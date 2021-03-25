@@ -3,6 +3,7 @@ package distkvs
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 
@@ -59,10 +60,26 @@ type FrontEndGetArgs struct {
 	Token tracing.TracingToken
 }
 
+type FrontEndConnectArgs struct {
+	StorageAddr string
+}
+
 type FrontEnd struct {
 	// FrontEnd state
 	StorageTimeout uint8
 	Tracer *tracing.Tracer
+	Storage *rpc.Client
+}
+
+// API Endpoint for storage to connect to when it starts up
+func (f *FrontEnd) Connect(args FrontEndConnectArgs, reply *struct{}) error {
+	log.Println("Connection to frontend made from storage.")
+	storage, err := rpc.Dial("tcp", args.StorageAddr)
+	if err != nil {
+		return fmt.Errorf("failed to dial storage: %s", err)
+	}
+	f.Storage = storage
+	return nil
 }
 
 func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string, storageTimeout uint8, ftrace *tracing.Tracer) error {
@@ -89,10 +106,10 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
-func (f *FrontEnd) Put(args FrontEndPutArgs, reply FrontEndPutResult) error {
+func (f *FrontEnd) Put(args FrontEndPutArgs, reply *FrontEndPutResult) error {
 	return errors.New("not implemented")
 }
 
-func (f *FrontEnd) Get(args FrontEndGetArgs, reply FrontEndGetResult) error {
+func (f *FrontEnd) Get(args FrontEndGetArgs, reply *FrontEndGetResult) error {
 	return errors.New("not implemented")
 }
