@@ -52,7 +52,7 @@ type KvslibPutResult struct {
 type KvslibGetResult struct {
 	OpId  uint32
 	Key   string
-	Value string
+	Value *string
 	Err   bool
 }
 
