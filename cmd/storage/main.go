@@ -1,7 +1,6 @@
 package main
 
 import (
-	//"github.com/DistributedClocks/tracing"
 	"log"
 
 	distkvs "example.org/cpsc416/a5"
@@ -16,7 +15,7 @@ func main() {
 	}
 
 	log.Println(config)
-
+	//
 	//tracer := tracing.NewTracer(tracing.TracerConfig{
 	//	ServerAddress:  config.TracerServerAddr,
 	//	TracerIdentity: "storage",
@@ -24,8 +23,10 @@ func main() {
 	//})
 
 	storage := distkvs.Storage{}
-	err = storage.Start(config.FrontEndAddr, string(config.StorageAdd), "testDiskFile.txt", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+	//err = storage.Start(config.FrontEndAddr, string(config.StorageAdd), config.DiskPath, nil)
+	storage.TestSuite()
+
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
 }
