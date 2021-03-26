@@ -1,7 +1,6 @@
 package distkvs
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -39,6 +38,18 @@ type FrontEndGet struct {
 }
 
 type FrontEndGetResult struct {
+	Key   string
+	Value *string
+	Err   bool
+}
+// KVS Reply structs:
+type KvslibPutResult struct {
+	OpId uint32
+	Err  bool
+}
+
+type KvslibGetResult struct {
+	OpId  uint32
 	Key   string
 	Value *string
 	Err   bool
@@ -91,7 +102,7 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 		Tracer:         ftrace,
 	}
 	server := rpc.NewServer()
-	err := server.Register(handler)
+	err := server.Register(&handler)
 	if err != nil {
 		return fmt.Errorf("format of FrontEnd RPCs aren't correct: %s", err)
 	}
@@ -111,7 +122,7 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
-func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *FrontEndPutResult) error {
+func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(FrontEndPut{
 		Key:   args.Key,
@@ -122,29 +133,28 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *FrontEndPutResult)
 	err := f.Storage.Call("Storage.Put", callArgs, &putReply)
 	if err != nil {
 		reply.Err = true
-		return nil
+		return err
 	}
-	if putReply.Err {
-		reply.Err = putReply.Err
-	}
-	return errors.New("not implemented")
+	reply.Err = putReply.Err
+	reply.OpId = args.OpId
+	return nil
 }
 
-func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *FrontEndGetResult) error {
+func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(FrontEndGet{
 		Key:   args.Key,
 	})
 	callArgs := StorageGet{Key: args.Key}
-	getReply := FrontEndPutResult{}
+	getReply := FrontEndGetResult{}
 	err := f.Storage.Call("Storage.Get", callArgs, &getReply)
 	if err != nil {
 		reply.Err = true
-		return nil
+		return err
 	}
-	if getReply.Err {
-		reply.Err = getReply.Err
-		return nil
-	}
-	return errors.New("not implemented")
+	reply.Value = getReply.Value
+	reply.Err = getReply.Err
+	reply.Key = getReply.Key
+	reply.OpId = args.OpId
+	return nil
 }

@@ -70,6 +70,7 @@ type ResultStruct struct {
 
 type KVS struct {
 	frontEnd *rpc.Client
+	globalTrace *tracing.Trace
 	notifyCh    NotifyChannel
 	closeWg     *sync.WaitGroup
 	opId uint32
@@ -91,6 +92,8 @@ func NewKVS() *KVS {
 // an appropriate err value, otherwise err should be set to nil.
 func (d *KVS) Initialize(flocalTracer *tracing.Tracer, clientId string, frontEndAddr string, chCapacity uint) (NotifyChannel, error) {
 	log.Printf("Dialing FrontEnd at %s", frontEndAddr)
+	d.globalTrace = flocalTracer.CreateTrace()
+	d.globalTrace.RecordAction(KvslibBegin{ClientId: clientId})
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
 		return nil, fmt.Errorf("error dialing frontEnd: %s", err)
@@ -110,10 +113,11 @@ func (d *KVS) Initialize(flocalTracer *tracing.Tracer, clientId string, frontEnd
 // the client when it wants to get value for a key.
 func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, error) {
 	// Should return OpId or error
+	log.Println("Called get.")
 	trace := tracer.CreateTrace()
 	d.closeWg.Add(1)
 	go d.callGet(tracer, trace, clientId, key)
-	return 0, errors.New("not implemented")
+	return 0, nil
 }
 
 func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId string, key string) {
@@ -132,8 +136,8 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		OpId:     0,
 		Key:      key,
 	})
-	result := ResultStruct{}
-	call := d.frontEnd.Go("FrontEnd.Get", args, &result, nil)
+	result := KvslibGetResult{}
+	call := d.frontEnd.Go("FrontEndRPCHandler.Get", args, &result, nil)
 	for {
 		select {
 		case <-call.Done:
@@ -141,7 +145,12 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				d.notifyCh <- result
+				log.Println(result)
+				d.notifyCh <- ResultStruct{
+					OpId:        result.OpId,
+					StorageFail: result.Err,
+					Result:      result.Value,
+				}
 			}
 			return
 		}
@@ -153,10 +162,11 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 // key and value pair.
 func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value string) (uint32, error) {
 	// Should return OpId or error
+	log.Println("Called put.")
 	trace := tracer.CreateTrace()
 	d.closeWg.Add(1)
 	go d.callPut(tracer, trace, clientId, key, value)
-	return 0, errors.New("not implemented")
+	return 0, nil
 }
 
 func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId string, key string, value string) {
@@ -177,8 +187,8 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		Key:      key,
 		Value: value,
 	})
-	result := ResultStruct{}
-	call := d.frontEnd.Go("FrontEnd.Put", args, &result, nil)
+	result := KvslibPutResult{}
+	call := d.frontEnd.Go("FrontEndRPCHandler.Put", args, &result, nil)
 	for {
 		select {
 		case <-call.Done:
@@ -186,7 +196,12 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				d.notifyCh <- result
+				log.Println(result)
+				d.notifyCh <- ResultStruct{
+					OpId:        result.OpId,
+					StorageFail: result.Err,
+					Result:      nil,
+				}
 			}
 			return
 		}
@@ -198,5 +213,6 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 // with stopping, this should return an appropriate err value, otherwise err
 // should be set to nil.
 func (d *KVS) Close() error {
+	d.globalTrace.RecordAction(KvslibComplete{})
 	return errors.New("not implemented")
 }
