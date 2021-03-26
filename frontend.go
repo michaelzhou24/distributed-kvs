@@ -40,7 +40,7 @@ type FrontEndGet struct {
 
 type FrontEndGetResult struct {
 	Key   string
-	Value string
+	Value *string
 	Err   bool
 }
 
@@ -66,13 +66,16 @@ type FrontEndConnectArgs struct {
 
 type FrontEnd struct {
 	// FrontEnd state
+}
+
+type FrontEndRPCHandler struct {
 	StorageTimeout uint8
 	Tracer *tracing.Tracer
 	Storage *rpc.Client
 }
 
 // API Endpoint for storage to connect to when it starts up
-func (f *FrontEnd) Connect(args FrontEndConnectArgs, reply *struct{}) error {
+func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
 	log.Println("Connection to frontend made from storage.")
 	storage, err := rpc.Dial("tcp", args.StorageAddr)
 	if err != nil {
@@ -83,12 +86,14 @@ func (f *FrontEnd) Connect(args FrontEndConnectArgs, reply *struct{}) error {
 }
 
 func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string, storageTimeout uint8, ftrace *tracing.Tracer) error {
-	f.StorageTimeout = storageTimeout
-	f.Tracer = ftrace
+	handler := FrontEndRPCHandler{
+		StorageTimeout: storageTimeout,
+		Tracer:         ftrace,
+	}
 	server := rpc.NewServer()
-	err := server.Register(f)
+	err := server.Register(handler)
 	if err != nil {
-		return fmt.Errorf("format of Coordinator RPCs aren't correct: %s", err)
+		return fmt.Errorf("format of FrontEnd RPCs aren't correct: %s", err)
 	}
 
 	storageListener, e := net.Listen("tcp", storageAPIListenAddr)
@@ -106,10 +111,40 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
-func (f *FrontEnd) Put(args FrontEndPutArgs, reply *FrontEndPutResult) error {
+func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *FrontEndPutResult) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(FrontEndPut{
+		Key:   args.Key,
+		Value: args.Value,
+	})
+	callArgs := StoragePut{Key: args.Key, Value: args.Value}
+	putReply := FrontEndPutResult{}
+	err := f.Storage.Call("Storage.Put", callArgs, &putReply)
+	if err != nil {
+		reply.Err = true
+		return nil
+	}
+	if putReply.Err {
+		reply.Err = putReply.Err
+	}
 	return errors.New("not implemented")
 }
 
-func (f *FrontEnd) Get(args FrontEndGetArgs, reply *FrontEndGetResult) error {
+func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *FrontEndGetResult) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(FrontEndGet{
+		Key:   args.Key,
+	})
+	callArgs := StorageGet{Key: args.Key}
+	getReply := FrontEndPutResult{}
+	err := f.Storage.Call("Storage.Get", callArgs, &getReply)
+	if err != nil {
+		reply.Err = true
+		return nil
+	}
+	if getReply.Err {
+		reply.Err = getReply.Err
+		return nil
+	}
 	return errors.New("not implemented")
 }

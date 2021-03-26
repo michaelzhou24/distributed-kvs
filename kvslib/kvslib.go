@@ -89,7 +89,7 @@ func NewKVS() *KVS {
 // have capacity ChCapacity and must be used by kvslib to deliver all solution
 // notifications. If there is an issue with connecting, this should return
 // an appropriate err value, otherwise err should be set to nil.
-func (d *KVS) Initialize(frontEndAddr string, chCapacity uint) (NotifyChannel, error) {
+func (d *KVS) Initialize(flocalTracer *tracing.Tracer, clientId string, frontEndAddr string, chCapacity uint) (NotifyChannel, error) {
 	log.Printf("Dialing FrontEnd at %s", frontEndAddr)
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
@@ -197,6 +197,6 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 // from delivering any solutions via the notify-channel. If there is an issue
 // with stopping, this should return an appropriate err value, otherwise err
 // should be set to nil.
-func (d *KVS) Close(tracer *tracing.Tracer) error {
+func (d *KVS) Close() error {
 	return errors.New("not implemented")
 }
