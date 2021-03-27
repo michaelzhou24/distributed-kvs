@@ -46,6 +46,7 @@ type StorageGetResult struct {
 
 type Storage struct {
 	// state may go here
+	tracer         *tracing.Tracer
 	frontEndClient *rpc.Client
 	memoryKVS      map[string]string
 	diskFile       *os.File
@@ -53,8 +54,9 @@ type Storage struct {
 }
 
 // FrontEndAddr - IP:Port of frontend node to connect to
-func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, strace *tracing.Tracer) error {
+func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	// Connect to frontEND
+	s.tracer = trace
 	log.Printf("dailing frontEnd at %s", frontEndAddr)
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
@@ -102,18 +104,32 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 
 	return nil
 }
-func (s *Storage) Get(tracer *tracing.Tracer, key string) (int, error) {
+func (s *Storage) Get(args StorageGet, reply *FrontEndGetResult) error {
+	// trace.recievetoken(args.token)
+	key := args.Key
+
 	val, err := s.memoryKVS[key]
 	if err == false {
 		log.Printf("Key %s not in map!\n", key)
-		return -1, errors.New("key not found")
+		reply.Key = args.Key
+		reply.Value = nil
+		reply.Err = true
+		// reply.traceToken = trace.gen
+		return errors.New("ket not in map")
 	}
 	log.Printf("Hit for map; %s:%s \n", key, val)
 
-	return 0, nil
+	reply.Key = args.Key
+	reply.Value = &val
+	reply.Err = false
+	// reply.traceToken = trace.gen
+	return nil
 }
 
-func (s *Storage) Put(tracer *tracing.Tracer, key string, value string) (int, error) {
+func (s *Storage) Put(args StoragePut, reply *FrontEndPutResult) error {
+	// trace := s.tracer.RecieveTokren(args.TraceToken)
+	key := args.Key
+	value := args.Value
 	log.Printf("Writing to disk; %s:%s...  \n", key, value)
 
 	err := errors.New("")
@@ -133,10 +149,12 @@ func (s *Storage) Put(tracer *tracing.Tracer, key string, value string) (int, er
 		panic(err)
 	}
 
-	return 0, nil
+	// reply.tracetoken = trace.generateToken()
+	reply.Err = false
+	return nil
 }
 
-func (s *Storage) Close(tracer *tracing.Tracer) {
+func (s *Storage) Close() {
 	log.Printf("Closing storage node...\n")
 	if err := s.diskFile.Close(); err != nil {
 		panic(err)
@@ -146,18 +164,18 @@ func (s *Storage) Close(tracer *tracing.Tracer) {
 
 func (s *Storage) TestSuite() {
 
-	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "testKey1") // should be empty
-	s.Put(nil, "testKey1", "testVal1")
-	s.Close(nil)
-
-	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "testKey1")           // should get testVal1
-	s.Put(nil, "testKey1", "NewVAL") // should write
-	s.Close(nil)
-
-	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "testKey1") // should get NEWVAL
-	s.Close(nil)
+	//s.Start(".", ".", "diskFile.txt", nil)
+	//s.Get(nil, "testKey1") // should be empty
+	//s.Put(nil, "testKey1", "testVal1")
+	//s.Close(nil)
+	//
+	//s.Start(".", ".", "diskFile.txt", nil)
+	//s.Get(nil, "testKey1")           // should get testVal1
+	//s.Put(nil, "testKey1", "NewVAL") // should write
+	//s.Close(nil)
+	//
+	//s.Start(".", ".", "diskFile.txt", nil)
+	//s.Get(nil, "testKey1") // should get NEWVAL
+	//s.Close(nil)
 
 }
