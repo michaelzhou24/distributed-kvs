@@ -146,10 +146,11 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
 	putReply := FrontEndPutResult{}
 
-	err := f.callPut(callArgs, putReply, 1)
+	err := f.callPut(callArgs, &putReply, 1)
 	if err != nil {
 		reply.Err = true
 		// TODO: trace that storage is dead
+		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
 		reply.Err = putReply.Err
 	}
@@ -158,15 +159,14 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 	return nil
 }
 
-func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply FrontEndPutResult, retry uint8) error {
+func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEndPutResult, retry uint8) error {
 	c := make(chan error, 1)
-	go func() { c <- f.Storage.Call("StorageRPC.Put", callArgs, &putReply) }()
+	go func() { c <- f.Storage.Call("StorageRPC.Put", callArgs, putReply) }()
 	select {
 	case err := <-c:
 		// use err and result
-		if err != nil {
-			return err
-		}
+		log.Println("Done with callput", putReply)
+		return err
 	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
 		// call timed out
 		if retry == 1 {
@@ -190,11 +190,12 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 		log.Printf("Storage ref in front is nil! \n")
 	}
 
-	err := f.callGet(callArgs, getReply, 1)
-
+	err := f.callGet(callArgs, &getReply, 1)
+	log.Println("asdasdasdad", getReply)
 	if err != nil {
 		reply.Err = true
 		// TODO: trace that storage is dead
+		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
 		reply.Err = getReply.Err
 	}
@@ -206,11 +207,12 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	return nil
 }
 
-func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply FrontEndGetResult, retry uint8) error {
+func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEndGetResult, retry uint8) error {
 	c := make(chan error, 1)
-	go func() { c <- f.Storage.Call("StorageRPC.Get", callArgs, &getReply) }()
+	go func() { c <- f.Storage.Call("StorageRPC.Get", callArgs, getReply) }()
 	select {
 	case err := <-c:
+		log.Println("Done with callget", getReply)
 		return err
 		// use err and result
 	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
@@ -222,6 +224,5 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply FrontEndG
 			return errors.New("timed out after retrying")
 		}
 	}
-	return nil
 }
 
