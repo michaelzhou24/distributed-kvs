@@ -4,7 +4,7 @@ import (
 	"log"
 
 	distkvs "example.org/cpsc416/a5"
-	//"github.com/DistributedClocks/tracing"
+	"github.com/DistributedClocks/tracing"
 )
 
 func main() {
@@ -15,18 +15,17 @@ func main() {
 	}
 
 	log.Println(config)
-	//
-	//tracer := tracing.NewTracer(tracing.TracerConfig{
-	//	ServerAddress:  config.TracerServerAddr,
-	//	TracerIdentity: "storage",
-	//	Secret:         config.TracerSecret,
-	//})
+
+	tracer := tracing.NewTracer(tracing.TracerConfig{
+		ServerAddress:  config.TracerServerAddr,
+		TracerIdentity: "storage",
+		Secret:         config.TracerSecret,
+	})
 
 	storage := distkvs.Storage{}
-	//err = storage.Start(config.FrontEndAddr, string(config.StorageAdd), config.DiskPath, nil)
-	storage.TestSuite()
-
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+	err = storage.Start(config.FrontEndAddr, string(config.StorageAdd), config.DiskPath, tracer)
+	if err != nil {
+		log.Fatal(err)
+	}
+	select {}
 }

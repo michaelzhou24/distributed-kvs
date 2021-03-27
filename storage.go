@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"log"
+	"net"
 	"net/rpc"
 	"os"
 )
@@ -54,20 +55,20 @@ type Storage struct {
 // FrontEndAddr - IP:Port of frontend node to connect to
 func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, strace *tracing.Tracer) error {
 	// Connect to frontEND
-	//log.Printf("dailing frontEnd at %s", frontEndAddr)
-	//frontEnd, err := rpc.Dial("tcp", frontEndAddr)
-	//if err != nil {
-	//	return fmt.Errorf("error dialing coordinator: %s", err)
-	//}
-	//s.frontEndClient = frontEnd
+	log.Printf("dailing frontEnd at %s", frontEndAddr)
+	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
+	if err != nil {
+		return fmt.Errorf("error dialing coordinator: %s", err)
+	}
+	s.frontEndClient = frontEnd
 	//
 	//// Listen or something?
-	//server := rpc.NewServer()
-	//frontEndListener, e := net.Listen("tcp", storageAddr)
-	//if e != nil {
-	//	return fmt.Errorf("failed to listen on %s: %s", storageAddr, e)
-	//}
-	//server.Accept(frontEndListener)
+	server := rpc.NewServer()
+	frontEndListener, e := net.Listen("tcp", storageAddr)
+	if e != nil {
+		return fmt.Errorf("failed to listen on %s: %s", storageAddr, e)
+	}
+	server.Accept(frontEndListener)
 	s.diskPath = diskPath
 	s.memoryKVS = make(map[string]string)
 	// Check if file on disk exists
@@ -101,7 +102,7 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 
 	return nil
 }
-func (s *Storage) Get(tracer *tracing.Tracer, clientId string, key string) (int, error) {
+func (s *Storage) Get(tracer *tracing.Tracer, key string) (int, error) {
 	val, err := s.memoryKVS[key]
 	if err == false {
 		log.Printf("Key %s not in map!\n", key)
@@ -112,7 +113,7 @@ func (s *Storage) Get(tracer *tracing.Tracer, clientId string, key string) (int,
 	return 0, nil
 }
 
-func (s *Storage) Put(tracer *tracing.Tracer, clientId string, key string, value string) (int, error) {
+func (s *Storage) Put(tracer *tracing.Tracer, key string, value string) (int, error) {
 	log.Printf("Writing to disk; %s:%s...  \n", key, value)
 
 	err := errors.New("")
@@ -146,17 +147,17 @@ func (s *Storage) Close(tracer *tracing.Tracer) {
 func (s *Storage) TestSuite() {
 
 	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "1", "testKey1") // should be empty
-	s.Put(nil, "1", "testKey1", "testVal1")
+	s.Get(nil, "testKey1") // should be empty
+	s.Put(nil, "testKey1", "testVal1")
 	s.Close(nil)
 
 	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "1", "testKey1")           // should get testVal1
-	s.Put(nil, "1", "testKey1", "NewVAL") // should write
+	s.Get(nil, "testKey1")           // should get testVal1
+	s.Put(nil, "testKey1", "NewVAL") // should write
 	s.Close(nil)
 
 	s.Start(".", ".", "diskFile.txt", nil)
-	s.Get(nil, "1", "testKey1") // should get NEWVAL
+	s.Get(nil, "testKey1") // should get NEWVAL
 	s.Close(nil)
 
 }
