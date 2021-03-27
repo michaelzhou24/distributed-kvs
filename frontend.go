@@ -27,10 +27,12 @@ type FrontEndStorageFailed struct{}
 type FrontEndPut struct {
 	Key   string
 	Value string
+	Token tracing.TracingToken
 }
 
 type FrontEndPutResult struct {
-	Err bool
+	Err   bool
+	Token tracing.TracingToken
 }
 
 type FrontEndGet struct {
@@ -41,6 +43,7 @@ type FrontEndGetResult struct {
 	Key   string
 	Value *string
 	Err   bool
+	Token tracing.TracingToken
 }
 
 // KVS Reply structs:
@@ -136,15 +139,16 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 		Key:   args.Key,
 		Value: args.Value,
 	})
-	callArgs := StoragePut{Key: args.Key, Value: args.Value}
+	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
 	putReply := FrontEndPutResult{}
-	err := f.Storage.Call("Storage.Put", callArgs, &putReply)
+	err := f.Storage.Call("StorageRPC.Put", callArgs, &putReply)
 	if err != nil {
 		reply.Err = true
 		return err
 	}
 	reply.Err = putReply.Err
 	reply.OpId = args.OpId
+	f.Tracer.ReceiveToken(putReply.Token)
 	return nil
 }
 
@@ -153,12 +157,12 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	trace.RecordAction(FrontEndGet{
 		Key: args.Key,
 	})
-	callArgs := StorageGet{Key: args.Key}
+	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
 	getReply := FrontEndGetResult{}
 	if f.Storage == nil {
 		log.Printf("Storage ref in front is nil! \n")
 	}
-	err := f.Storage.Call("Storage.Get", callArgs, &getReply)
+	err := f.Storage.Call("StorageRPC.Get", callArgs, &getReply)
 	if err != nil {
 		reply.Err = true
 		return err
@@ -167,5 +171,6 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	reply.Err = getReply.Err
 	reply.Key = getReply.Key
 	reply.OpId = args.OpId
+	f.Tracer.ReceiveToken(getReply.Token)
 	return nil
 }
