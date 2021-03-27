@@ -145,7 +145,7 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				log.Println(result)
+				trace.RecordAction(result)
 				d.notifyCh <- ResultStruct{
 					OpId:        result.OpId,
 					StorageFail: result.Err,
@@ -171,7 +171,7 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 
 func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId string, key string, value string) {
 	defer func() {
-		log.Printf("callGet done")
+		log.Printf("callPut done")
 		d.closeWg.Done()
 	}()
 	args := KvslibPutArgs{
@@ -196,7 +196,7 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				log.Println(result)
+				trace.RecordAction(result)
 				d.notifyCh <- ResultStruct{
 					OpId:        result.OpId,
 					StorageFail: result.Err,

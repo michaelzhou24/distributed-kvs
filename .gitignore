@@ -4,3 +4,4 @@ tracing-server
 storage
 client
 *.log
+tmp

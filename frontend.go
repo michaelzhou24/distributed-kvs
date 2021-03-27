@@ -1,11 +1,12 @@
 package distkvs
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/rpc"
-
+	"time"
 	"github.com/DistributedClocks/tracing"
 )
 
@@ -77,6 +78,7 @@ type FrontEndGetArgs struct {
 
 type FrontEndConnectArgs struct {
 	StorageAddr string
+	Token tracing.TracingToken
 }
 
 type FrontEnd struct {
@@ -91,6 +93,8 @@ type FrontEndRPCHandler struct {
 
 // API Endpoint for storage to connect to when it starts up
 func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(FrontEndStorageStarted{})
 	log.Println("frontend: Dialing storage....")
 	storage, err := rpc.Dial("tcp", args.StorageAddr)
 	if err != nil {
@@ -141,14 +145,37 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 	})
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
 	putReply := FrontEndPutResult{}
-	err := f.Storage.Call("StorageRPC.Put", callArgs, &putReply)
+
+	err := f.callPut(callArgs, putReply, 1)
 	if err != nil {
 		reply.Err = true
-		return err
+		// TODO: trace that storage is dead
+	} else {
+		reply.Err = putReply.Err
 	}
-	reply.Err = putReply.Err
 	reply.OpId = args.OpId
-	f.Tracer.ReceiveToken(putReply.Token)
+	trace.RecordAction(putReply)
+	return nil
+}
+
+func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply FrontEndPutResult, retry uint8) error {
+	c := make(chan error, 1)
+	go func() { c <- f.Storage.Call("StorageRPC.Put", callArgs, &putReply) }()
+	select {
+	case err := <-c:
+		// use err and result
+		if err != nil {
+			return err
+		}
+	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+		// call timed out
+		if retry == 1 {
+			return f.callPut(callArgs, putReply, 0)
+		} else {
+			log.Println("timed out after retrying")
+			return errors.New("timed out after retrying")
+		}
+	}
 	return nil
 }
 
@@ -162,15 +189,39 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	if f.Storage == nil {
 		log.Printf("Storage ref in front is nil! \n")
 	}
-	err := f.Storage.Call("StorageRPC.Get", callArgs, &getReply)
+
+	err := f.callGet(callArgs, getReply, 1)
+
 	if err != nil {
 		reply.Err = true
-		return err
+		// TODO: trace that storage is dead
+	} else {
+		reply.Err = getReply.Err
 	}
+
 	reply.Value = getReply.Value
-	reply.Err = getReply.Err
 	reply.Key = getReply.Key
 	reply.OpId = args.OpId
-	f.Tracer.ReceiveToken(getReply.Token)
+	trace.RecordAction(getReply)
 	return nil
 }
+
+func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply FrontEndGetResult, retry uint8) error {
+	c := make(chan error, 1)
+	go func() { c <- f.Storage.Call("StorageRPC.Get", callArgs, &getReply) }()
+	select {
+	case err := <-c:
+		return err
+		// use err and result
+	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+		// call timed out
+		if retry == 1 {
+			return f.callGet(callArgs, getReply, 0)
+		} else {
+			log.Println("timed out after retrying")
+			return errors.New("timed out after retrying")
+		}
+	}
+	return nil
+}
+

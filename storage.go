@@ -137,7 +137,10 @@ func (s1 *Storage) Start(frontEndAddr string, storageAddr string, diskPath strin
 	if e != nil {
 		return fmt.Errorf("failed to listen on %s: %s", storageAddr, e)
 	}
-	fArgs := FrontEndConnectArgs{StorageAddr: storageAddr}
+	fArgs := FrontEndConnectArgs{
+		StorageAddr: storageAddr,
+		Token: tracer.GenerateToken(),
+	}
 	go server.Accept(frontEndListener)
 	e = s.frontEndClient.Call("FrontEndRPCHandler.Connect", fArgs, nil)
 	if e != nil {
