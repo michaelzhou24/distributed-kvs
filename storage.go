@@ -58,6 +58,11 @@ type Storage struct {
 func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	// Connect to frontEND
 	s.tracer = trace
+	currPath, _ := os.Getwd()
+	diskPath = currPath + diskPath + "disk.txt"
+	s.diskPath = diskPath
+	s.memoryKVS = make(map[string]string)
+
 	log.Printf("storage: dailing frontEnd at %s", frontEndAddr)
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
@@ -67,24 +72,32 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 	log.Printf("Storage: succesfully connected to front end! \n")
 	//
 	//// Listen or something?
+	handler := Storage{
+		tracer:         trace,
+		frontEndClient: frontEnd,
+		memoryKVS:      s.memoryKVS,
+		diskFile:       nil,
+		diskPath:       s.diskPath,
+	}
 	server := rpc.NewServer()
+	err = server.Register(&handler)
+	if err != nil {
+		return fmt.Errorf("format of Storage RPCs aren't correct: %s", err)
+	}
+
 	frontEndListener, e := net.Listen("tcp", storageAddr)
 	if e != nil {
 		return fmt.Errorf("failed to listen on %s: %s", storageAddr, e)
 	}
 	fArgs := FrontEndConnectArgs{StorageAddr: storageAddr}
-	f := FrontEndRPCHandler{}
 	go server.Accept(frontEndListener)
-	e = f.Connect(fArgs, nil)
+	e = s.frontEndClient.Call("FrontEndRPCHandler.Connect", fArgs, nil)
 	if e != nil {
 		log.Printf("Error connecting to front end node! \n")
+		panic(e)
 	}
 	log.Printf("storage: Succesfully accepted connection from front end! \n")
 
-	currPath, _ := os.Getwd()
-	diskPath = currPath + diskPath + "disk.txt"
-	s.diskPath = diskPath
-	s.memoryKVS = make(map[string]string)
 	// Check if file on disk exists
 	if _, err := os.Stat(diskPath); err == nil {
 		fmt.Printf("Disk path already exists... \n")
