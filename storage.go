@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"path/filepath"
 )
 
 type StorageConfig struct {
@@ -57,12 +58,13 @@ type Storage struct {
 func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	// Connect to frontEND
 	s.tracer = trace
-	log.Printf("dailing frontEnd at %s", frontEndAddr)
+	log.Printf("storage: dailing frontEnd at %s", frontEndAddr)
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
-		return fmt.Errorf("error dialing coordinator: %s", err)
+		return fmt.Errorf("storage: error dialing frontend: %s", err)
 	}
 	s.frontEndClient = frontEnd
+	log.Printf("Storage: succesfully connected to front end! \n")
 	//
 	//// Listen or something?
 	server := rpc.NewServer()
@@ -70,12 +72,22 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 	if e != nil {
 		return fmt.Errorf("failed to listen on %s: %s", storageAddr, e)
 	}
-	server.Accept(frontEndListener)
+	fArgs := FrontEndConnectArgs{StorageAddr: storageAddr}
+	f := FrontEndRPCHandler{}
+	go server.Accept(frontEndListener)
+	e = f.Connect(fArgs, nil)
+	if e != nil {
+		log.Printf("Error connecting to front end node! \n")
+	}
+	log.Printf("storage: Succesfully accepted connection from front end! \n")
+
+	currPath, _ := os.Getwd()
+	diskPath = currPath + diskPath + "disk.txt"
 	s.diskPath = diskPath
 	s.memoryKVS = make(map[string]string)
 	// Check if file on disk exists
 	if _, err := os.Stat(diskPath); err == nil {
-		fmt.Printf("Disk path exists \n")
+		fmt.Printf("Disk path already exists... \n")
 		// path/to/whatever exists
 		// If disk contains some stuff, restore state to memory; (map)
 		s.diskFile, err = os.OpenFile(diskPath, os.O_APPEND|os.O_RDWR, 0600)
@@ -91,7 +103,11 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 
 	} else if os.IsNotExist(err) {
 		// path/to/whatever does *not* exist
-		fmt.Printf("Disk path does not exist! \n")
+		fmt.Printf("Disk path does not exist, so creating it... \n")
+		if err := os.MkdirAll(filepath.Dir(diskPath), 0770); err != nil {
+			panic(err)
+		}
+
 		disk, err := os.OpenFile(diskPath, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0600)
 
 		//disk, err := os.Create("/" + diskPath)
@@ -106,6 +122,7 @@ func (s *Storage) Start(frontEndAddr string, storageAddr string, diskPath string
 }
 func (s *Storage) Get(args StorageGet, reply *FrontEndGetResult) error {
 	// trace.recievetoken(args.token)
+	log.Printf("Storage: Get()\n")
 	key := args.Key
 
 	val, err := s.memoryKVS[key]

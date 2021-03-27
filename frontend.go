@@ -88,12 +88,19 @@ type FrontEndRPCHandler struct {
 
 // API Endpoint for storage to connect to when it starts up
 func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
-	log.Println("Connection to frontend made from storage.")
+	log.Println("frontend: Dialing storage....")
 	storage, err := rpc.Dial("tcp", args.StorageAddr)
 	if err != nil {
+		log.Printf("frontend: Error dialing storage node from front end \n")
 		return fmt.Errorf("failed to dial storage: %s", err)
 	}
 	f.Storage = storage
+	if f.Storage == nil {
+		log.Printf("frontEnd: Storage ref in front is nil! \n")
+	} else {
+		log.Printf("frontEnd: Succesfully connected to storage node! \n")
+	}
+
 	return nil
 }
 
@@ -148,6 +155,9 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	})
 	callArgs := StorageGet{Key: args.Key}
 	getReply := FrontEndGetResult{}
+	if f.Storage == nil {
+		log.Printf("Storage ref in front is nil! \n")
+	}
 	err := f.Storage.Call("Storage.Get", callArgs, &getReply)
 	if err != nil {
 		reply.Err = true
