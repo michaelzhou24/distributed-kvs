@@ -23,14 +23,35 @@ func main() {
 	}
 	defer client.Close()
 
-	if err, _ := client.Get("clientID1", "key1"); err != 0 {
+	if err, _ := client.Put("clientID1", "key2", "value1"); err != 0 {
 		log.Println(err)
 	}
 	if err, _ := client.Put("clientID1", "key2", "value2"); err != 0 {
 		log.Println(err)
 	}
+	if err, _ := client.Put("clientID1", "key2", "value3"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put("clientID1", "key2", "value4"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put("clientID1", "key2", "value5"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put("clientID1", "key2", "value6"); err != 0 {
+		log.Println(err)
+	}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 6; i++ {
+		result := <-client.NotifyChannel
+		log.Println(result)
+	}
+
+	if err, _ := client.Get("clientID1", "key2"); err != 0 {
+		log.Println(err)
+	}
+
+	for i := 0; i < 1; i++ {
 		result := <-client.NotifyChannel
 		log.Println(result)
 	}

@@ -3,11 +3,12 @@ package distkvs
 import (
 	"errors"
 	"fmt"
+	"github.com/DistributedClocks/tracing"
 	"log"
+	"math"
 	"net"
 	"net/rpc"
 	"time"
-	"github.com/DistributedClocks/tracing"
 )
 
 type StorageAddr string
@@ -85,36 +86,20 @@ type FrontEnd struct {
 	// FrontEnd state
 }
 
+type OpIdChan chan uint32
+
 type FrontEndRPCHandler struct {
 	StorageTimeout uint8
 	Tracer         *tracing.Tracer
 	Storage        *rpc.Client
-}
-
-// API Endpoint for storage to connect to when it starts up
-func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
-	trace := f.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(FrontEndStorageStarted{})
-	log.Println("frontend: Dialing storage....")
-	storage, err := rpc.Dial("tcp", args.StorageAddr)
-	if err != nil {
-		log.Printf("frontend: Error dialing storage node from front end \n")
-		return fmt.Errorf("failed to dial storage: %s", err)
-	}
-	f.Storage = storage
-	if f.Storage == nil {
-		log.Printf("frontEnd: Storage ref in front is nil! \n")
-	} else {
-		log.Printf("frontEnd: Succesfully connected to storage node! \n")
-	}
-
-	return nil
+	ClientState map[string]OpIdChan
 }
 
 func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string, storageTimeout uint8, ftrace *tracing.Tracer) error {
 	handler := FrontEndRPCHandler{
 		StorageTimeout: storageTimeout,
 		Tracer:         ftrace,
+		ClientState: make(map[string]OpIdChan),
 	}
 	server := rpc.NewServer()
 	err := server.Register(&handler)
@@ -137,16 +122,58 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
+// API Endpoint for storage to connect to when it starts up
+func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(FrontEndStorageStarted{})
+	log.Println("frontend: Dialing storage....")
+	storage, err := rpc.Dial("tcp", args.StorageAddr)
+	if err != nil {
+		log.Printf("frontend: Error dialing storage node from front end \n")
+		return fmt.Errorf("failed to dial storage: %s", err)
+	}
+	f.Storage = storage
+	if f.Storage == nil {
+		log.Printf("frontEnd: Storage ref in front is nil! \n")
+	} else {
+		log.Printf("frontEnd: Succesfully connected to storage node! \n")
+	}
+
+	return nil
+}
+
+func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
+	if _, ok := f.ClientState[clientId]; !ok {
+		f.ClientState[clientId] = make(OpIdChan, math.MaxUint8)
+		f.ClientState[clientId] <- 0
+	}
+}
+
 func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
+	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
+	putReply := FrontEndPutResult{}
+	f.addToClientMap(args.ClientId)
+	waiting:
+		for {
+			select {
+			case val:=<-f.ClientState[args.ClientId]:
+				if val >= args.OpId {
+					log.Println(val)
+					break waiting
+				} else {
+					f.ClientState[args.ClientId] <- val
+				}
+			}
+		}
 	trace.RecordAction(FrontEndPut{
 		Key:   args.Key,
 		Value: args.Value,
 	})
-	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
-	putReply := FrontEndPutResult{}
-
 	err := f.callPut(callArgs, &putReply, 1)
+	log.Println("Hello")
+	f.ClientState[args.ClientId] <- (args.OpId + 1)
+	log.Println("WOrld")
 	if err != nil {
 		reply.Err = true
 		// TODO: trace that storage is dead
@@ -176,22 +203,33 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 			return errors.New("timed out after retrying")
 		}
 	}
-	return nil
 }
 
 func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(FrontEndGet{
-		Key: args.Key,
-	})
 	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
 	getReply := FrontEndGetResult{}
 	if f.Storage == nil {
 		log.Printf("Storage ref in front is nil! \n")
 	}
+	f.addToClientMap(args.ClientId)
+	waiting:
+		for {
+			select {
+			case val:=<-f.ClientState[args.ClientId]:
+				if val >= args.OpId {
+					break waiting
+				} else {
+					f.ClientState[args.ClientId] <- val
+				}
+			}
+		}
 
+	trace.RecordAction(FrontEndGet{
+		Key: args.Key,
+	})
 	err := f.callGet(callArgs, &getReply, 1)
-	log.Println("asdasdasdad", getReply)
+	f.ClientState[args.ClientId] <- (args.OpId + 1)
 	if err != nil {
 		reply.Err = true
 		// TODO: trace that storage is dead

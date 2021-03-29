@@ -74,6 +74,7 @@ type KVS struct {
 	notifyCh    NotifyChannel
 	closeWg     *sync.WaitGroup
 	opId        uint32
+	mu sync.Mutex
 	// Add more KVS instance state here.
 }
 
@@ -125,17 +126,21 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		log.Printf("callGet done")
 		d.closeWg.Done()
 	}()
+	d.mu.Lock()
 	args := KvslibGetArgs{
 		ClientId: clientId,
-		OpId:     0,
+		OpId:     d.opId,
 		Key:      key,
 		Token:    trace.GenerateToken(),
 	}
 	trace.RecordAction(KvslibGet{
 		ClientId: clientId,
-		OpId:     0,
+		OpId:     d.opId,
 		Key:      key,
 	})
+	d.opId = d.opId + 1
+	d.mu.Unlock()
+
 	result := KvslibGetResult{}
 	call := d.frontEnd.Go("FrontEndRPCHandler.Get", args, &result, nil)
 	for {
@@ -174,19 +179,23 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		log.Printf("callPut done")
 		d.closeWg.Done()
 	}()
+	d.mu.Lock()
 	args := KvslibPutArgs{
 		ClientId: clientId,
-		OpId:     0,
+		OpId:     d.opId,
 		Key:      key,
 		Value:    value,
 		Token:    trace.GenerateToken(),
 	}
 	trace.RecordAction(KvslibPut{
 		ClientId: clientId,
-		OpId:     0,
+		OpId:     d.opId,
 		Key:      key,
 		Value:    value,
 	})
+	d.opId = d.opId + 1
+	d.mu.Unlock()
+
 	result := KvslibPutResult{}
 	call := d.frontEnd.Go("FrontEndRPCHandler.Put", args, &result, nil)
 	for {
