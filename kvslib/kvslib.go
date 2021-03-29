@@ -48,14 +48,24 @@ type KvslibPutResult struct {
 	OpId uint32
 	Err  bool
 }
-
+type KvslibPutReply struct {
+	OpId  uint32
+	Err   bool
+	Token tracing.TracingToken
+}
 type KvslibGetResult struct {
 	OpId  uint32
 	Key   string
 	Value *string
 	Err   bool
 }
-
+type KvslibGetReply struct {
+	OpId  uint32
+	Key   string
+	Value *string
+	Err   bool
+	Token tracing.TracingToken
+}
 type KvslibComplete struct {
 	ClientId string
 }
@@ -131,7 +141,7 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		ClientId: clientId,
 		OpId:     d.opId,
 		Key:      key,
-		Token:    trace.GenerateToken(),
+		Token:    nil, // Generate after recording
 	}
 	trace.RecordAction(KvslibGet{
 		ClientId: clientId,
@@ -140,8 +150,8 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 	})
 	d.opId = d.opId + 1
 	d.mu.Unlock()
-
-	result := KvslibGetResult{}
+	args.Token = trace.GenerateToken()
+	result := KvslibGetReply{}
 	call := d.frontEnd.Go("FrontEndRPCHandler.Get", args, &result, nil)
 	for {
 		select {
@@ -150,7 +160,13 @@ func (d *KVS) callGet(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				trace.RecordAction(result)
+				tracer.ReceiveToken(result.Token)
+				trace.RecordAction(KvslibGetResult{
+					OpId:  result.OpId,
+					Key:   result.Key,
+					Value: result.Value,
+					Err:   result.Err,
+				})
 				d.notifyCh <- ResultStruct{
 					OpId:        result.OpId,
 					StorageFail: result.Err,
@@ -185,7 +201,7 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 		OpId:     d.opId,
 		Key:      key,
 		Value:    value,
-		Token:    trace.GenerateToken(),
+		Token:    nil,
 	}
 	trace.RecordAction(KvslibPut{
 		ClientId: clientId,
@@ -195,8 +211,8 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 	})
 	d.opId = d.opId + 1
 	d.mu.Unlock()
-
-	result := KvslibPutResult{}
+	args.Token = trace.GenerateToken()
+	result := KvslibPutReply{}
 	call := d.frontEnd.Go("FrontEndRPCHandler.Put", args, &result, nil)
 	for {
 		select {
@@ -205,7 +221,11 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 				log.Fatal(call.Error)
 			} else {
 				// Handle result
-				trace.RecordAction(result)
+				tracer.ReceiveToken(result.Token)
+				trace.RecordAction(KvslibPutResult{
+					OpId: result.OpId,
+					Err:  result.Err,
+				})
 				d.notifyCh <- ResultStruct{
 					OpId:        result.OpId,
 					StorageFail: result.Err,

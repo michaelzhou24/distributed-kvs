@@ -139,10 +139,12 @@ func (s1 *Storage) Start(frontEndAddr string, storageAddr string, diskPath strin
 	}
 	fArgs := FrontEndConnectArgs{
 		StorageAddr: storageAddr,
-		Token: tracer.GenerateToken(),
+		Token:       tracer.GenerateToken(),
 	}
 	go server.Accept(frontEndListener)
-	e = s.frontEndClient.Call("FrontEndRPCHandler.Connect", fArgs, nil)
+	reply := FrontEndConnectReply{}
+	e = s.frontEndClient.Call("FrontEndRPCHandler.Connect", fArgs, &reply)
+	trace.ReceiveToken(reply.Token)
 	if e != nil {
 		log.Printf("Error connecting to front end node! \n")
 		panic(e)
@@ -166,10 +168,10 @@ func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetResult) error {
 		//log.Printf("Key %s not in map!\n", key)
 		reply.Key = args.Key
 		reply.Value = nil
-		reply.Err = true
+		reply.Err = false
 		reply.Token = trace.GenerateToken()
 		// reply.traceToken = trace.gen
-		return errors.New("key not in map")
+		return nil // TODO: Should this return an error
 	}
 	//log.Printf("Hit for map; %s:%s \n", key, val)
 	trace.RecordAction(StorageGetResult{

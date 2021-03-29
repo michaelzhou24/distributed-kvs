@@ -53,12 +53,23 @@ type KvslibPutResult struct {
 	OpId uint32
 	Err  bool
 }
-
+type KvslibPutReply struct {
+	OpId  uint32
+	Err   bool
+	Token tracing.TracingToken
+}
 type KvslibGetResult struct {
 	OpId  uint32
 	Key   string
 	Value *string
 	Err   bool
+}
+type KvslibGetReply struct {
+	OpId  uint32
+	Key   string
+	Value *string
+	Err   bool
+	Token tracing.TracingToken
 }
 
 // RPC Structs Below:
@@ -79,6 +90,10 @@ type FrontEndGetArgs struct {
 
 type FrontEndConnectArgs struct {
 	StorageAddr string
+	Token       tracing.TracingToken
+}
+
+type FrontEndConnectReply struct {
 	Token tracing.TracingToken
 }
 
@@ -93,6 +108,27 @@ type FrontEndRPCHandler struct {
 	Tracer         *tracing.Tracer
 	Storage        *rpc.Client
 	ClientState map[string]OpIdChan
+}
+
+// API Endpoint for storage to connect to when it starts up
+func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndConnectReply) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(FrontEndStorageStarted{})
+	log.Println("frontend: Dialing storage....")
+	storage, err := rpc.Dial("tcp", args.StorageAddr)
+	if err != nil {
+		log.Printf("frontend: Error dialing storage node from front end \n")
+		return fmt.Errorf("failed to dial storage: %s", err)
+	}
+	f.Storage = storage
+	if f.Storage == nil {
+		log.Printf("frontEnd: Storage ref in front is nil! \n")
+	} else {
+		log.Printf("frontEnd: Succesfully connected to storage node! \n")
+	}
+	reply.Token = trace.GenerateToken()
+
+	return nil
 }
 
 func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string, storageTimeout uint8, ftrace *tracing.Tracer) error {
@@ -122,26 +158,6 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
-// API Endpoint for storage to connect to when it starts up
-func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
-	trace := f.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(FrontEndStorageStarted{})
-	log.Println("frontend: Dialing storage....")
-	storage, err := rpc.Dial("tcp", args.StorageAddr)
-	if err != nil {
-		log.Printf("frontend: Error dialing storage node from front end \n")
-		return fmt.Errorf("failed to dial storage: %s", err)
-	}
-	f.Storage = storage
-	if f.Storage == nil {
-		log.Printf("frontEnd: Storage ref in front is nil! \n")
-	} else {
-		log.Printf("frontEnd: Succesfully connected to storage node! \n")
-	}
-
-	return nil
-}
-
 func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
 	if _, ok := f.ClientState[clientId]; !ok {
 		f.ClientState[clientId] = make(OpIdChan, math.MaxUint8)
@@ -149,7 +165,7 @@ func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
 	}
 }
 
-func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) error {
+func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
 	putReply := FrontEndPutResult{}
@@ -182,7 +198,10 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 		reply.Err = putReply.Err
 	}
 	reply.OpId = args.OpId
+	f.Tracer.ReceiveToken(putReply.Token)
 	trace.RecordAction(putReply)
+	reply.Token = trace.GenerateToken() // for kvslib
+
 	return nil
 }
 
@@ -194,7 +213,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 		// use err and result
 		log.Println("Done with callput", putReply)
 		return err
-	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
 		if retry == 1 {
 			return f.callPut(callArgs, putReply, 0)
@@ -205,7 +224,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 	}
 }
 
-func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) error {
+func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
 	getReply := FrontEndGetResult{}
@@ -232,16 +251,21 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
 	if err != nil {
 		reply.Err = true
+
 		// TODO: trace that storage is dead
 		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
 		reply.Err = getReply.Err
 	}
 
+	f.Tracer.ReceiveToken(getReply.Token)
+	trace.RecordAction(getReply)
+
+	reply.Token = trace.GenerateToken()
 	reply.Value = getReply.Value
 	reply.Key = getReply.Key
 	reply.OpId = args.OpId
-	trace.RecordAction(getReply)
+
 	return nil
 }
 
@@ -253,7 +277,7 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 		log.Println("Done with callget", getReply)
 		return err
 		// use err and result
-	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
 		if retry == 1 {
 			return f.callGet(callArgs, getReply, 0)
@@ -263,4 +287,3 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 		}
 	}
 }
-
