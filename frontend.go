@@ -3,11 +3,11 @@ package distkvs
 import (
 	"errors"
 	"fmt"
+	"github.com/DistributedClocks/tracing"
 	"log"
 	"net"
 	"net/rpc"
 	"time"
-	"github.com/DistributedClocks/tracing"
 )
 
 type StorageAddr string
@@ -52,12 +52,23 @@ type KvslibPutResult struct {
 	OpId uint32
 	Err  bool
 }
-
+type KvslibPutReply struct {
+	OpId  uint32
+	Err   bool
+	Token tracing.TracingToken
+}
 type KvslibGetResult struct {
 	OpId  uint32
 	Key   string
 	Value *string
 	Err   bool
+}
+type KvslibGetReply struct {
+	OpId  uint32
+	Key   string
+	Value *string
+	Err   bool
+	Token tracing.TracingToken
 }
 
 // RPC Structs Below:
@@ -78,6 +89,10 @@ type FrontEndGetArgs struct {
 
 type FrontEndConnectArgs struct {
 	StorageAddr string
+	Token       tracing.TracingToken
+}
+
+type FrontEndConnectReply struct {
 	Token tracing.TracingToken
 }
 
@@ -92,7 +107,7 @@ type FrontEndRPCHandler struct {
 }
 
 // API Endpoint for storage to connect to when it starts up
-func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) error {
+func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndConnectReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(FrontEndStorageStarted{})
 	log.Println("frontend: Dialing storage....")
@@ -107,6 +122,7 @@ func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *struct{}) 
 	} else {
 		log.Printf("frontEnd: Succesfully connected to storage node! \n")
 	}
+	reply.Token = trace.GenerateToken()
 
 	return nil
 }
@@ -137,7 +153,7 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	return nil
 }
 
-func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) error {
+func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(FrontEndPut{
 		Key:   args.Key,
@@ -155,7 +171,10 @@ func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutResult) e
 		reply.Err = putReply.Err
 	}
 	reply.OpId = args.OpId
+	f.Tracer.ReceiveToken(putReply.Token)
 	trace.RecordAction(putReply)
+	reply.Token = trace.GenerateToken() // for kvslib
+
 	return nil
 }
 
@@ -167,7 +186,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 		// use err and result
 		log.Println("Done with callput", putReply)
 		return err
-	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
 		if retry == 1 {
 			return f.callPut(callArgs, putReply, 0)
@@ -179,7 +198,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 	return nil
 }
 
-func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) error {
+func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(FrontEndGet{
 		Key: args.Key,
@@ -194,16 +213,21 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetResult) e
 	log.Println("asdasdasdad", getReply)
 	if err != nil {
 		reply.Err = true
+
 		// TODO: trace that storage is dead
 		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
 		reply.Err = getReply.Err
 	}
 
+	f.Tracer.ReceiveToken(getReply.Token)
+	trace.RecordAction(getReply)
+
+	reply.Token = trace.GenerateToken()
 	reply.Value = getReply.Value
 	reply.Key = getReply.Key
 	reply.OpId = args.OpId
-	trace.RecordAction(getReply)
+
 	return nil
 }
 
@@ -215,7 +239,7 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 		log.Println("Done with callget", getReply)
 		return err
 		// use err and result
-	case <-time.After(time.Duration(uint64(f.StorageTimeout)*1e9)):
+	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
 		if retry == 1 {
 			return f.callGet(callArgs, getReply, 0)
@@ -225,4 +249,3 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 		}
 	}
 }
-
