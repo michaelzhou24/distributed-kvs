@@ -1,0 +1,7 @@
+.idea
+frontend
+tracing-server
+storage
+client
+*.log
+tmp
