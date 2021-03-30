@@ -6,8 +6,6 @@ make
 cmds=(
       "./tracing-server"
       "./frontend"
-      "./storage"
-      "./client"
       )
 
 for cmd in "${cmds[@]}"; do {

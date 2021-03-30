@@ -3,7 +3,6 @@
 package kvslib
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net/rpc"
@@ -84,7 +83,8 @@ type KVS struct {
 	notifyCh    NotifyChannel
 	closeWg     *sync.WaitGroup
 	opId        uint32
-	mu sync.Mutex
+	mu          sync.Mutex
+	clientID    string
 	// Add more KVS instance state here.
 }
 
@@ -103,6 +103,7 @@ func NewKVS() *KVS {
 // an appropriate err value, otherwise err should be set to nil.
 func (d *KVS) Initialize(flocalTracer *tracing.Tracer, clientId string, frontEndAddr string, chCapacity uint) (NotifyChannel, error) {
 	log.Printf("Dialing FrontEnd at %s", frontEndAddr)
+	d.clientID = clientId
 	d.globalTrace = flocalTracer.CreateTrace()
 	d.globalTrace.RecordAction(KvslibBegin{ClientId: clientId})
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
@@ -242,6 +243,7 @@ func (d *KVS) callPut(tracer *tracing.Tracer, trace *tracing.Trace, clientId str
 // with stopping, this should return an appropriate err value, otherwise err
 // should be set to nil.
 func (d *KVS) Close() error {
-	d.globalTrace.RecordAction(KvslibComplete{})
-	return errors.New("not implemented")
+	close(d.notifyCh)
+	d.globalTrace.RecordAction(KvslibComplete{d.clientID})
+	return nil
 }

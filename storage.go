@@ -10,6 +10,7 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type StorageConfig struct {
@@ -63,6 +64,7 @@ type StorageRPC struct {
 	memoryKVS      map[string]string
 	diskFile       *os.File
 	diskPath       string
+	mutex          sync.Mutex
 }
 
 // FrontEndAddr - IP:Port of frontend node to connect to
@@ -153,7 +155,7 @@ func (s1 *Storage) Start(frontEndAddr string, storageAddr string, diskPath strin
 
 	return nil
 }
-func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetResult) error {
+func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetReply) error {
 	trace := s.tracer.ReceiveToken(args.Token)
 	trace.RecordAction(StorageGet{Key: args.Key})
 
@@ -186,9 +188,9 @@ func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetResult) error {
 	return nil
 }
 
-func (s *StorageRPC) Put(args StoragePutArgs, reply *FrontEndPutResult) error {
+func (s *StorageRPC) Put(args StoragePutArgs, reply *FrontEndPutReply) error {
 	// trace := s.tracer.RecieveTokren(args.TraceToken)
-
+	s.mutex.Lock()
 	trace := s.tracer.ReceiveToken(args.Token)
 	trace.RecordAction(StoragePut{
 		Key:   args.Key,
@@ -228,6 +230,7 @@ func (s *StorageRPC) Put(args StoragePutArgs, reply *FrontEndPutResult) error {
 	})
 	reply.Token = trace.GenerateToken()
 	reply.Err = false
+	s.mutex.Unlock()
 	return nil
 }
 

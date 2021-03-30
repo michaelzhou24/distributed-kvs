@@ -29,19 +29,26 @@ type FrontEndStorageFailed struct{}
 type FrontEndPut struct {
 	Key   string
 	Value string
-	Token tracing.TracingToken
 }
 
 type FrontEndPutResult struct {
+	Err bool
+}
+
+type FrontEndPutReply struct {
 	Err   bool
 	Token tracing.TracingToken
 }
-
 type FrontEndGet struct {
 	Key string
 }
 
 type FrontEndGetResult struct {
+	Key   string
+	Value *string
+	Err   bool
+}
+type FrontEndGetReply struct {
 	Key   string
 	Value *string
 	Err   bool
@@ -107,7 +114,7 @@ type FrontEndRPCHandler struct {
 	StorageTimeout uint8
 	Tracer         *tracing.Tracer
 	Storage        *rpc.Client
-	ClientState map[string]OpIdChan
+	ClientState    map[string]OpIdChan
 }
 
 // API Endpoint for storage to connect to when it starts up
@@ -135,7 +142,7 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 	handler := FrontEndRPCHandler{
 		StorageTimeout: storageTimeout,
 		Tracer:         ftrace,
-		ClientState: make(map[string]OpIdChan),
+		ClientState:    make(map[string]OpIdChan),
 	}
 	server := rpc.NewServer()
 	err := server.Register(&handler)
@@ -167,50 +174,64 @@ func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
 
 func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
-	putReply := FrontEndPutResult{}
+	putReply := FrontEndPutReply{}
 	f.addToClientMap(args.ClientId)
-	waiting:
-		for {
-			select {
-			case val:=<-f.ClientState[args.ClientId]:
-				if val >= args.OpId {
-					log.Println(val)
-					break waiting
-				} else {
-					f.ClientState[args.ClientId] <- val
-				}
+waiting:
+	for {
+		select {
+		case val := <-f.ClientState[args.ClientId]:
+			if val >= args.OpId {
+				log.Println(val)
+				break waiting
+			} else {
+				f.ClientState[args.ClientId] <- val
 			}
 		}
+	}
 	trace.RecordAction(FrontEndPut{
 		Key:   args.Key,
 		Value: args.Value,
 	})
+	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
+
 	err := f.callPut(callArgs, &putReply, 1)
-	log.Println("Hello")
+	//log.Println("Hello")
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
-	log.Println("WOrld")
+	//	log.Println("WOrld")
 	if err != nil {
 		reply.Err = true
 		// TODO: trace that storage is dead
+		putReply.Err = true
 		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
 		reply.Err = putReply.Err
 	}
 	reply.OpId = args.OpId
 	f.Tracer.ReceiveToken(putReply.Token)
-	trace.RecordAction(putReply)
+	trace.RecordAction(FrontEndPutResult{Err: putReply.Err})
 	reply.Token = trace.GenerateToken() // for kvslib
 
 	return nil
 }
 
-func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEndPutResult, retry uint8) error {
+func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEndPutReply, retry uint8) error {
 	c := make(chan error, 1)
 	go func() { c <- f.Storage.Call("StorageRPC.Put", callArgs, putReply) }()
 	select {
 	case err := <-c:
 		// use err and result
+		if err == rpc.ErrShutdown {
+			log.Printf("Storage connection shutdown, retrying... \n")
+
+			time.Sleep(time.Duration(f.StorageTimeout) * time.Second)
+			if retry == 1 {
+				return f.callPut(callArgs, putReply, 0)
+			} else {
+				log.Println("timed out after retrying")
+				return errors.New("timed out after retrying")
+			}
+		}
+
 		log.Println("Done with callput", putReply)
 		return err
 	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
@@ -226,32 +247,32 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 
 func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
-	getReply := FrontEndGetResult{}
+	getReply := FrontEndGetReply{}
 	if f.Storage == nil {
 		log.Printf("Storage ref in front is nil! \n")
 	}
 	f.addToClientMap(args.ClientId)
-	waiting:
-		for {
-			select {
-			case val:=<-f.ClientState[args.ClientId]:
-				if val >= args.OpId {
-					break waiting
-				} else {
-					f.ClientState[args.ClientId] <- val
-				}
+waiting:
+	for {
+		select {
+		case val := <-f.ClientState[args.ClientId]:
+			if val >= args.OpId {
+				break waiting
+			} else {
+				f.ClientState[args.ClientId] <- val
 			}
 		}
-
+	}
 	trace.RecordAction(FrontEndGet{
 		Key: args.Key,
 	})
+	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
+
 	err := f.callGet(callArgs, &getReply, 1)
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
 	if err != nil {
 		reply.Err = true
-
+		getReply.Err = true
 		// TODO: trace that storage is dead
 		trace.RecordAction(FrontEndStorageFailed{})
 	} else {
@@ -259,21 +280,35 @@ func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) er
 	}
 
 	f.Tracer.ReceiveToken(getReply.Token)
-	trace.RecordAction(getReply)
+	trace.RecordAction(FrontEndGetResult{
+		Key:   args.Key,
+		Value: getReply.Value,
+		Err:   getReply.Err,
+	})
 
 	reply.Token = trace.GenerateToken()
 	reply.Value = getReply.Value
-	reply.Key = getReply.Key
+	reply.Key = args.Key
 	reply.OpId = args.OpId
 
 	return nil
 }
 
-func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEndGetResult, retry uint8) error {
+func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEndGetReply, retry uint8) error {
 	c := make(chan error, 1)
 	go func() { c <- f.Storage.Call("StorageRPC.Get", callArgs, getReply) }()
 	select {
 	case err := <-c:
+		if err == rpc.ErrShutdown {
+			log.Printf("Storage connection shutdown, retrying... \n")
+			time.Sleep(time.Duration(f.StorageTimeout) * time.Second)
+			if retry == 1 {
+				return f.callGet(callArgs, getReply, 0)
+			} else {
+				log.Println("timed out after retrying")
+				return errors.New("timed out after retrying")
+			}
+		}
 		log.Println("Done with callget", getReply)
 		return err
 		// use err and result
