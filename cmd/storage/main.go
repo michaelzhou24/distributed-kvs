@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	distkvs "example.org/cpsc416/a5"
@@ -9,7 +10,10 @@ import (
 
 func main() {
 	var config distkvs.StorageConfig
-	err := distkvs.ReadJSONConfig("config/storage_config.json", &config)
+	var configFile string
+	flag.StringVar(&configFile, "config", "config/storage_config.json", "Config")
+	flag.Parse()
+	err := distkvs.ReadJSONConfig(configFile, &config)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -18,7 +22,7 @@ func main() {
 
 	tracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracerServerAddr,
-		TracerIdentity: "storage",
+		TracerIdentity: config.StorageID,
 		Secret:         config.TracerSecret,
 	})
 
