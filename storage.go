@@ -24,33 +24,51 @@ type StorageConfig struct {
 }
 
 type StorageLoadSuccess struct {
-	State map[string]string
+	StorageID string
+	State     map[string]string
 }
 
 type StoragePut struct {
-	Key   string
-	Value string
+	StorageID string
+	Key       string
+	Value     string
 }
+
+type StorageSaveData struct {
+	StorageID string
+	Key       string
+	Value     string
+}
+
+type StorageGet struct {
+	StorageID string
+	Key       string
+}
+
+type StorageGetResult struct {
+	StorageID string
+	Key       string
+	Value     string
+}
+
+type StorageJoining struct {
+	StorageID string
+}
+
+type StorageJoined struct {
+	StorageID string
+	State     map[string]string
+}
+
 type StoragePutArgs struct {
 	Key   string
 	Value string
 	Token tracing.TracingToken
 }
-type StorageSaveData struct {
-	Key   string
-	Value string
-}
 
-type StorageGet struct {
-	Key string
-}
 type StorageGetArgs struct {
 	Key   string
 	Token tracing.TracingToken
-}
-type StorageGetResult struct {
-	Key   string
-	Value string
 }
 
 type Storage struct {
@@ -68,7 +86,7 @@ type StorageRPC struct {
 }
 
 // FrontEndAddr - IP:Port of frontend node to connect to
-func (s1 *Storage) Start(frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
+func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	s := StorageRPC{}
 	s.tracer = trace
 
@@ -141,6 +159,7 @@ func (s1 *Storage) Start(frontEndAddr string, storageAddr string, diskPath strin
 	}
 	fArgs := FrontEndConnectArgs{
 		StorageAddr: storageAddr,
+		StorageID: storageId,
 		Token:       tracer.GenerateToken(),
 	}
 	go server.Accept(frontEndListener)

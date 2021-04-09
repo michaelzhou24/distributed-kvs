@@ -105,6 +105,7 @@ type FrontEndGetArgs struct {
 
 type FrontEndConnectArgs struct {
 	StorageAddr string
+	StorageID string
 	Token       tracing.TracingToken
 }
 
@@ -136,14 +137,14 @@ func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndCo
 		log.Printf("frontend: Error dialing storage node from front end \n")
 		return fmt.Errorf("failed to dial storage: %s", err)
 	}
-	f.Storages[args.StorageAddr] = storage
+	f.Storages[args.StorageID] = storage
 
-	if f.Storages[args.StorageAddr] == nil {
-		f.StorageState[args.StorageAddr] = 0
+	if f.Storages[args.StorageID] == nil {
+		f.StorageState[args.StorageID] = 0
 		log.Printf("frontEnd: Storage ref in front is nil! \n")
 	} else {
 		log.Printf("frontEnd: Succesfully connected to storage node! \n")
-		f.StorageState[args.StorageAddr] = 1
+		f.StorageState[args.StorageID] = 1
 	}
 	reply.Token = trace.GenerateToken()
 
@@ -209,15 +210,16 @@ waiting:
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
 	replies := make([]FrontEndPutReply, len(f.Storages))
 	index := 0
-	for _, element := range f.Storages {
+	// TODO: make these calls concurrent
+	for storageID, element := range f.Storages {
 		err := f.callPut(callArgs, &(replies[index]), element, 1)
 		if err != nil {
-			trace.RecordAction(FrontEndStorageFailed{})
+			trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 		}
 		index = index + 1
 	}
 
-	// TODO
+	// TODO: handle replies, handle Err
 	putReply := replies[0]
 	//log.Println("Hello")
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
@@ -294,10 +296,11 @@ waiting:
 	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
 	replies := make([]FrontEndGetReply, len(f.Storages))
 	index := 0
-	for _, element := range f.Storages {
+	// TODO: make these calls concurrent
+	for storageID, element := range f.Storages {
 		err := f.callGet(callArgs, &(replies[index]), element, 1)
 		if err != nil {
-			trace.RecordAction(FrontEndStorageFailed{})
+			trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 		}
 		index = index + 1
 	}
@@ -306,7 +309,6 @@ waiting:
 	//if err != nil {
 	//	reply.Err = true
 	//	getReply.Err = true
-	//	// TODO: trace that storage is dead
 	//	trace.RecordAction(FrontEndStorageFailed{})
 	//} else {
 	//	reply.Err = getReply.Err
