@@ -124,7 +124,6 @@ type FrontEndRPCHandler struct {
 	Tracer         *tracing.Tracer
 	Storages        map[string]*rpc.Client
 	ClientState    map[string]OpIdChan
-	StorageState 	map[string]uint8
 }
 
 // API Endpoint for storage to connect to when it starts up
@@ -140,11 +139,10 @@ func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndCo
 	f.Storages[args.StorageID] = storage
 
 	if f.Storages[args.StorageID] == nil {
-		f.StorageState[args.StorageID] = 0
 		log.Printf("frontEnd: Storage ref in front is nil! \n")
+		delete(f.Storages, args.StorageID);
 	} else {
 		log.Printf("frontEnd: Succesfully connected to storage node! \n")
-		f.StorageState[args.StorageID] = 1
 	}
 	reply.Token = trace.GenerateToken()
 
@@ -157,7 +155,6 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 		Tracer:         ftrace,
 		ClientState:    make(map[string]OpIdChan),
 		Storages: make(map[string]*rpc.Client),
-		StorageState: make(map[string]uint8),
 	}
 	server := rpc.NewServer()
 	err := server.Register(&handler)
@@ -189,7 +186,6 @@ func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
 
 func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	//putReply := FrontEndPutReply{}
 	f.addToClientMap(args.ClientId)
 waiting:
 	for {
@@ -208,29 +204,35 @@ waiting:
 		Value: args.Value,
 	})
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
-	replies := make([]FrontEndPutReply, len(f.Storages))
+	currentActiveStorages := len(f.Storages)
+	replies := make([]FrontEndPutReply, currentActiveStorages)
 	index := 0
-	// TODO: make these calls concurrent
+	//mu := sync.Mutex{}
+	storageCalls := make(chan uint8, currentActiveStorages)
 	for storageID, element := range f.Storages {
-		err := f.callPut(callArgs, &(replies[index]), element, 1)
-		if err != nil {
-			trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
-		}
+		go func(localIdx int) {
+			//mu.Lock()
+			//localIdx := index
+			//index = index + 1
+			//mu.Unlock()
+			log.Println(localIdx)
+			err := f.callPut(callArgs, &(replies[localIdx]), element, 1)
+			if err != nil {
+				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
+				delete(f.Storages, storageID)
+			}
+			storageCalls<-1
+		}(index)
 		index = index + 1
+	}
+	for i := 0; i < currentActiveStorages; i++ {
+		<-storageCalls
 	}
 
 	// TODO: handle replies, handle Err
 	putReply := replies[0]
-	//log.Println("Hello")
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
-	//	log.Println("WOrld")
-	//if err != nil {
-	//	reply.Err = true
-	//	putReply.Err = true
-	//	trace.RecordAction(FrontEndStorageFailed{})
-	//} else {
-	//	reply.Err = putReply.Err
-	//}
+
 	reply.OpId = args.OpId
 	f.Tracer.ReceiveToken(putReply.Token)
 	trace.RecordAction(FrontEndPutResult{Err: putReply.Err})
@@ -274,10 +276,6 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 
 func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	//getReply := FrontEndGetReply{}
-	//if f.Storage == nil {
-	//	log.Printf("Storage ref in front is nil! \n")
-	//}
 	f.addToClientMap(args.ClientId)
 waiting:
 	for {
@@ -294,26 +292,32 @@ waiting:
 		Key: args.Key,
 	})
 	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
-	replies := make([]FrontEndGetReply, len(f.Storages))
+	currentActiveStorages := len(f.Storages)
+	replies := make([]FrontEndGetReply, currentActiveStorages)
 	index := 0
-	// TODO: make these calls concurrent
+	//mu := sync.Mutex{}
+	storageCalls := make(chan uint8, currentActiveStorages)
 	for storageID, element := range f.Storages {
-		err := f.callGet(callArgs, &(replies[index]), element, 1)
-		if err != nil {
-			trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
-		}
+		go func(localIdx int) {
+			//mu.Lock()
+			//localIdx := index
+			//index = index + 1
+			//mu.Unlock()
+			log.Println(localIdx)
+			err := f.callGet(callArgs, &(replies[localIdx]), element, 1)
+			if err != nil {
+				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
+				delete(f.Storages, storageID)
+			}
+			storageCalls<-1
+		}(index)
 		index = index + 1
 	}
-
+	for i := 0; i < currentActiveStorages; i++ {
+		<-storageCalls
+	}
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
-	//if err != nil {
-	//	reply.Err = true
-	//	getReply.Err = true
-	//	trace.RecordAction(FrontEndStorageFailed{})
-	//} else {
-	//	reply.Err = getReply.Err
-	//}
-	// TODO
+	// TODO: Handle replies
 	getReply := replies[0]
 	f.Tracer.ReceiveToken(getReply.Token)
 	trace.RecordAction(FrontEndGetResult{
