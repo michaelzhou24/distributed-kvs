@@ -246,6 +246,7 @@ waiting:
 				delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				replies[localIdx].Err = true
 			}
 			storageCalls <- 1
 		}(index, element)
@@ -256,13 +257,33 @@ waiting:
 	}
 
 	// TODO: handle replies, handle Err
-	putReply := replies[0]
 	f.ClientState[args.ClientId] <- (args.OpId + 1)
 
-	reply.OpId = args.OpId
-	f.Tracer.ReceiveToken(putReply.Token)
-	trace.RecordAction(FrontEndPutResult{Err: putReply.Err})
-	reply.Token = trace.GenerateToken() // for kvslib
+	putReply := FrontEndPutReply{Err: true}
+	for _, fPutReply := range replies {
+		f.Tracer.ReceiveToken(fPutReply.Token)
+		log.Println(fPutReply)
+		if !fPutReply.Err {
+			putReply = fPutReply
+			break
+		}
+	}
+
+	if putReply.Err {
+		trace.RecordAction(FrontEndPutResult{
+			Err:   putReply.Err,
+		})
+		reply.Err = putReply.Err
+		reply.Token = trace.GenerateToken()
+		reply.OpId = args.OpId
+	} else {
+		trace.RecordAction(FrontEndPutResult{
+			Err:   putReply.Err,
+		})
+		reply.Err = putReply.Err
+		reply.Token = trace.GenerateToken()
+		reply.OpId = args.OpId
+	}
 
 	return nil
 }
@@ -386,6 +407,7 @@ waiting:
 				delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				replies[localIdx].Err = true
 			}
 			storageCalls<-1
 		}(index, element)
@@ -394,21 +416,42 @@ waiting:
 	for i := 0; i < currentActiveStorages; i++ {
 		<-storageCalls
 	}
-	f.ClientState[args.ClientId] <- (args.OpId + 1)
-	// TODO: Handle replies
-	getReply := replies[0]
-	f.Tracer.ReceiveToken(getReply.Token)
-	trace.RecordAction(FrontEndGetResult{
-		Key:   args.Key,
-		Value: getReply.Value,
-		Err:   getReply.Err,
-	})
+	f.ClientState[args.ClientId] <- args.OpId + 1
 
-	reply.Token = trace.GenerateToken()
-	reply.Value = getReply.Value
-	reply.Key = args.Key
-	reply.OpId = args.OpId
+	getReply := FrontEndGetReply{Err: true}
+	for _, fGetReply := range replies {
+		f.Tracer.ReceiveToken(fGetReply.Token)
+		log.Println(fGetReply)
+		if !fGetReply.Err {
+			getReply = fGetReply
+			break
+		}
+	}
 
+	if getReply.Err {
+		trace.RecordAction(FrontEndGetResult{
+			Key:   args.Key,
+			Value: getReply.Value,
+			Err:   getReply.Err,
+		})
+
+		reply.Token = trace.GenerateToken()
+		reply.Key = args.Key
+		reply.OpId = args.OpId
+		reply.Err = getReply.Err
+	} else {
+		trace.RecordAction(FrontEndGetResult{
+			Key:   args.Key,
+			Value: getReply.Value,
+			Err:   getReply.Err,
+		})
+
+		reply.Token = trace.GenerateToken()
+		reply.Value = getReply.Value
+		reply.Key = args.Key
+		reply.OpId = args.OpId
+		reply.Err = getReply.Err
+	}
 	return nil
 }
 
