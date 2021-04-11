@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"net/rpc"
+	"sync"
 	"time"
 )
 
@@ -105,31 +106,49 @@ type FrontEndGetArgs struct {
 
 type FrontEndConnectArgs struct {
 	StorageAddr string
-	StorageID string
+	StorageID   string
 	Token       tracing.TracingToken
 }
 
 type FrontEndConnectReply struct {
 	Token tracing.TracingToken
 }
-
+type FrontEndReqStateArgs struct {
+	Token tracing.TracingToken
+}
+type FrontEndReqStateReply struct {
+	Token tracing.TracingToken
+	State map[string]string
+}
+type FrontEndReqJoinArgs struct {
+	Token     tracing.TracingToken
+	StorageID string
+}
+type FrontEndReqJoinReply struct {
+	Token tracing.TracingToken
+}
 type FrontEnd struct {
 	// FrontEnd state
 }
 
 type OpIdChan chan uint32
-
+type StorageNode struct {
+	client *rpc.Client
+	joined bool
+}
 type FrontEndRPCHandler struct {
 	StorageTimeout uint8
 	Tracer         *tracing.Tracer
-	Storages        map[string]*rpc.Client
+	Storages       map[string]*rpc.Client
 	ClientState    map[string]OpIdChan
+	JoinedStorages map[string]bool // this is a set; need a way to differentiate joined nodes and connected nodes
+	Mutex          sync.Mutex
 }
 
 // API Endpoint for storage to connect to when it starts up
 func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndConnectReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(FrontEndStorageStarted{})
+	trace.RecordAction(FrontEndStorageStarted{args.StorageID})
 	log.Println("frontend: Dialing storage....")
 	storage, err := rpc.Dial("tcp", args.StorageAddr)
 	if err != nil {
@@ -140,7 +159,7 @@ func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndCo
 
 	if f.Storages[args.StorageID] == nil {
 		log.Printf("frontEnd: Storage ref in front is nil! \n")
-		delete(f.Storages, args.StorageID);
+		delete(f.Storages, args.StorageID)
 	} else {
 		log.Printf("frontEnd: Succesfully connected to storage node! \n")
 	}
@@ -154,7 +173,8 @@ func (f *FrontEnd) Start(clientAPIListenAddr string, storageAPIListenAddr string
 		StorageTimeout: storageTimeout,
 		Tracer:         ftrace,
 		ClientState:    make(map[string]OpIdChan),
-		Storages: make(map[string]*rpc.Client),
+		Storages:       make(map[string]*rpc.Client),
+		JoinedStorages: make(map[string]bool, 256),
 	}
 	server := rpc.NewServer()
 	err := server.Register(&handler)
@@ -204,12 +224,16 @@ waiting:
 		Value: args.Value,
 	})
 	callArgs := StoragePutArgs{Key: args.Key, Value: args.Value, Token: trace.GenerateToken()}
-	currentActiveStorages := len(f.Storages)
+	currentActiveStorages := len(f.JoinedStorages)
+	log.Printf("\n \n ############ Joined storages at put is: %s \n\n", f.JoinedStorages)
 	replies := make([]FrontEndPutReply, currentActiveStorages)
 	index := 0
 	//mu := sync.Mutex{}
 	storageCalls := make(chan uint8, currentActiveStorages)
 	for storageID, element := range f.Storages {
+		if !f.JoinedStorages[storageID] {
+			continue
+		}
 		go func(localIdx int) {
 			//mu.Lock()
 			//localIdx := index
@@ -220,8 +244,10 @@ waiting:
 			if err != nil {
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 				delete(f.Storages, storageID)
+				delete(f.JoinedStorages, storageID)
+				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 			}
-			storageCalls<-1
+			storageCalls <- 1
 		}(index)
 		index = index + 1
 	}
@@ -273,7 +299,54 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 		}
 	}
 }
+func (f *FrontEndRPCHandler) Join(args FrontEndReqJoinArgs, reply *FrontEndReqJoinReply) error {
+	f.Mutex.Lock()
+	trace := f.Tracer.ReceiveToken(args.Token)
+	f.JoinedStorages[args.StorageID] = true
 
+	trace.RecordAction(FrontEndStorageJoined{StorageIds: f.getJoinedStorageIDs()})
+	reply.Token = trace.GenerateToken()
+	f.Mutex.Unlock()
+	return nil
+}
+
+func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *FrontEndReqStateReply) error {
+	trace := f.Tracer.ReceiveToken(args.Token)
+
+	if len(f.JoinedStorages) == 0 {
+
+		reply.Token = trace.GenerateToken()
+		reply.State = make(map[string]string, 0)
+		return nil
+	}
+	// Finds up to date storage node;
+
+	for k := range f.JoinedStorages {
+		c := f.Storages[k] // Returns random joined client;
+		reqStateArgs := StorageGetStateArgs{Token: trace.GenerateToken()}
+		reqStateReply := StorageGetStateReply{}
+		e := c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply) // TODO: blocking or non blocking??
+		trace = f.Tracer.ReceiveToken(reqStateReply.Token)
+		if e != nil {
+			// TODO: Maybe  here we try another node ?
+			log.Println("error sending rpc call to requeststate")
+			return e
+		}
+		reply.Token = trace.GenerateToken()
+		reply.State = reqStateReply.State
+		break
+	}
+
+	// RPC call to that node with getState() --> map; non blocking
+	return nil
+}
+func (f *FrontEndRPCHandler) getJoinedStorageIDs() []string {
+	keys := make([]string, 0, len(f.JoinedStorages))
+	for k := range f.JoinedStorages {
+		keys = append(keys, k)
+	}
+	return keys
+}
 func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	f.addToClientMap(args.ClientId)
@@ -292,12 +365,15 @@ waiting:
 		Key: args.Key,
 	})
 	callArgs := StorageGetArgs{Key: args.Key, Token: trace.GenerateToken()}
-	currentActiveStorages := len(f.Storages)
+	currentActiveStorages := len(f.JoinedStorages)
 	replies := make([]FrontEndGetReply, currentActiveStorages)
 	index := 0
 	//mu := sync.Mutex{}
 	storageCalls := make(chan uint8, currentActiveStorages)
 	for storageID, element := range f.Storages {
+		if !f.JoinedStorages[storageID] {
+			continue
+		}
 		go func(localIdx int) {
 			//mu.Lock()
 			//localIdx := index
@@ -308,8 +384,10 @@ waiting:
 			if err != nil {
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 				delete(f.Storages, storageID)
+				delete(f.JoinedStorages, storageID)
+				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 			}
-			storageCalls<-1
+			storageCalls <- 1
 		}(index)
 		index = index + 1
 	}
@@ -343,7 +421,7 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 			log.Printf("Storage connection shutdown, retrying... \n")
 			time.Sleep(time.Duration(f.StorageTimeout) * time.Second)
 			if retry == 1 {
-				return f.callGet(callArgs, getReply, storageClient,0)
+				return f.callGet(callArgs, getReply, storageClient, 0)
 			} else {
 				log.Println("timed out after retrying")
 				return errors.New("timed out after retrying")

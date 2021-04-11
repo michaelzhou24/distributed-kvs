@@ -5,6 +5,7 @@ import (
 	"example.org/cpsc416/a5/kvslib"
 	"flag"
 	"log"
+	"time"
 )
 
 func main() {
@@ -45,6 +46,10 @@ func main() {
 	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
 		log.Println(err)
 	}
+	time.Sleep(time.Second * 10)
+	if err, _ := client.Put(config.ClientID, "big", "v555"); err != 0 {
+		log.Println(err)
+	}
 
 	//if err, _ := client.Get("clientID1", "k"); err != 0 {
 	//	log.Println(err)
@@ -75,7 +80,7 @@ func main() {
 	//	log.Println(err)
 	//}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		select {
 		case mineResult := <-client.NotifyChannel:
 			log.Println(mineResult)

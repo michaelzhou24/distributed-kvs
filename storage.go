@@ -70,7 +70,13 @@ type StorageGetArgs struct {
 	Key   string
 	Token tracing.TracingToken
 }
-
+type StorageGetStateArgs struct {
+	Token tracing.TracingToken
+}
+type StorageGetStateReply struct {
+	Token tracing.TracingToken
+	State map[string]string
+}
 type Storage struct {
 	// state may go here
 
@@ -159,7 +165,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	}
 	fArgs := FrontEndConnectArgs{
 		StorageAddr: storageAddr,
-		StorageID: storageId,
+		StorageID:   storageId,
 		Token:       tracer.GenerateToken(),
 	}
 	go server.Accept(frontEndListener)
@@ -170,9 +176,40 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 		log.Printf("Error connecting to front end node! \n")
 		panic(e)
 	}
-	log.Printf("storage: Succesfully accepted connection from front end! \n")
+	log.Printf("%s: Succesfully accepted connection from front end! \n", storageId)
+
+	// Join
+	tracer.RecordAction(StorageJoining{storageId})
+	// Rpc call to frontEnd.RequestState(); make it blocking
+	reqStateArgs := FrontEndReqStateArgs{Token: tracer.GenerateToken()}
+	reqStateReply := FrontEndReqStateReply{}
+	e = s.frontEndClient.Call("FrontEndRPCHandler.RequestState", reqStateArgs, &reqStateReply)
+	if e != nil {
+		log.Printf("Error: rpc call to frontend.requeststate")
+		panic(e)
+	}
+	trace.ReceiveToken(reqStateReply.Token)
+	// Replacing local map with values from getState()
+	for k, v := range reqStateReply.State {
+		s.memoryKVS[k] = v
+	}
+	tracer.RecordAction(StorageJoined{storageId, s.memoryKVS})
+	// frontEndstorageJoined
+	joinArgs := FrontEndReqJoinArgs{Token: tracer.GenerateToken(), StorageID: storageId}
+	joinReply := FrontEndReqJoinReply{}
+	e = s.frontEndClient.Call("FrontEndRPCHandler.Join", joinArgs, &joinReply)
+	trace.ReceiveToken(joinReply.Token)
 
 	return nil
+}
+
+func (s *StorageRPC) GetState(args StorageGetStateArgs, reply *StorageGetStateReply) error {
+	trace := s.tracer.ReceiveToken(args.Token)
+	reply.State = s.memoryKVS
+	reply.Token = trace.GenerateToken()
+	return nil
+	// What if we are servicing a put in the middle of a getState()?; do we need to handle?;
+
 }
 func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetReply) error {
 	trace := s.tracer.ReceiveToken(args.Token)
