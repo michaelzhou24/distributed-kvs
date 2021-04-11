@@ -234,7 +234,7 @@ waiting:
 		if !f.JoinedStorages[storageID] {
 			continue
 		}
-		go func(localIdx int) {
+		go func(localIdx int, element *rpc.Client) {
 			//mu.Lock()
 			//localIdx := index
 			//index = index + 1
@@ -248,7 +248,7 @@ waiting:
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 			}
 			storageCalls <- 1
-		}(index)
+		}(index, element)
 		index = index + 1
 	}
 	for i := 0; i < currentActiveStorages; i++ {
@@ -374,7 +374,7 @@ waiting:
 		if !f.JoinedStorages[storageID] {
 			continue
 		}
-		go func(localIdx int) {
+		go func(localIdx int, element *rpc.Client) {
 			//mu.Lock()
 			//localIdx := index
 			//index = index + 1
@@ -387,8 +387,8 @@ waiting:
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 			}
-			storageCalls <- 1
-		}(index)
+			storageCalls<-1
+		}(index, element)
 		index = index + 1
 	}
 	for i := 0; i < currentActiveStorages; i++ {
