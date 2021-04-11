@@ -89,11 +89,13 @@ type StorageRPC struct {
 	diskFile       *os.File
 	diskPath       string
 	mutex          sync.Mutex
+	storageID      string
 }
 
 // FrontEndAddr - IP:Port of frontend node to connect to
 func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	s := StorageRPC{}
+
 	s.tracer = trace
 
 	currPath, _ := os.Getwd()
@@ -134,7 +136,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 
 	}
 	tracer := trace.CreateTrace() // TODO: Dont think this is right?
-	tracer.RecordAction(StorageLoadSuccess{State: s.memoryKVS})
+	tracer.RecordAction(StorageLoadSuccess{StorageID: storageId, State: s.memoryKVS})
 	// Connect to frontEND
 
 	log.Printf("storage: dailing frontEnd at %s", frontEndAddr)
@@ -152,6 +154,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 		memoryKVS:      s.memoryKVS,
 		diskFile:       s.diskFile,
 		diskPath:       s.diskPath,
+		storageID:      storageId,
 	}
 	server := rpc.NewServer()
 	err = server.Register(&handler)
@@ -213,15 +216,16 @@ func (s *StorageRPC) GetState(args StorageGetStateArgs, reply *StorageGetStateRe
 }
 func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetReply) error {
 	trace := s.tracer.ReceiveToken(args.Token)
-	trace.RecordAction(StorageGet{Key: args.Key})
+	trace.RecordAction(StorageGet{StorageID: s.storageID, Key: args.Key})
 
 	key := args.Key
 
 	val, err := s.memoryKVS[key]
 	if err == false {
 		trace.RecordAction(StorageGetResult{
-			Key:   key,
-			Value: "nil",
+			Key:       key,
+			Value:     "nil",
+			StorageID: s.storageID,
 		})
 		//log.Printf("Key %s not in map!\n", key)
 		reply.Key = args.Key
@@ -233,8 +237,9 @@ func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetReply) error {
 	}
 	//log.Printf("Hit for map; %s:%s \n", key, val)
 	trace.RecordAction(StorageGetResult{
-		Key:   key,
-		Value: val,
+		Key:       key,
+		Value:     val,
+		StorageID: s.storageID,
 	})
 	reply.Key = args.Key
 	reply.Value = &val
@@ -249,8 +254,9 @@ func (s *StorageRPC) Put(args StoragePutArgs, reply *FrontEndPutReply) error {
 	s.mutex.Lock()
 	trace := s.tracer.ReceiveToken(args.Token)
 	trace.RecordAction(StoragePut{
-		Key:   args.Key,
-		Value: args.Value,
+		Key:       args.Key,
+		Value:     args.Value,
+		StorageID: s.storageID,
 	})
 	key := args.Key
 	value := args.Value
@@ -281,8 +287,9 @@ func (s *StorageRPC) Put(args StoragePutArgs, reply *FrontEndPutReply) error {
 		panic(err)
 	}
 	trace.RecordAction(StorageSaveData{
-		Key:   key,
-		Value: value,
+		StorageID: s.storageID,
+		Key:       key,
+		Value:     value,
 	})
 	reply.Token = trace.GenerateToken()
 	reply.Err = false
