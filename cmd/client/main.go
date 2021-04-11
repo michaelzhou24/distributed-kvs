@@ -5,7 +5,6 @@ import (
 	"example.org/cpsc416/a5/kvslib"
 	"flag"
 	"log"
-	"time"
 )
 
 func main() {
@@ -46,10 +45,10 @@ func main() {
 	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
 		log.Println(err)
 	}
-	time.Sleep(time.Second * 10)
-	if err, _ := client.Put(config.ClientID, "big", "v555"); err != 0 {
-		log.Println(err)
-	}
+	//time.Sleep(time.Second * 10)
+	//if err, _ := client.Put(config.ClientID, "big", "v555"); err != 0 {
+	//	log.Println(err)
+	//}
 
 	//if err, _ := client.Get("clientID1", "k"); err != 0 {
 	//	log.Println(err)

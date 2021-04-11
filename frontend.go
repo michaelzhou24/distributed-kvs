@@ -349,15 +349,27 @@ func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *Fron
 		e := c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply) // TODO: blocking or non blocking??
 		trace = f.Tracer.ReceiveToken(reqStateReply.Token)
 		if e != nil {
-			// TODO: Maybe  here we try another node ?
-			log.Println("error sending rpc call to requeststate")
-			return e
+			log.Printf("error calling getstate to node %s, retrying again...\n", k)
+			time.Sleep(time.Duration(f.StorageTimeout) * time.Second)
+			reqStateArgs := StorageGetStateArgs{Token: trace.GenerateToken()}
+			reqStateReply := StorageGetStateReply{}
+			e = c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply)
+			if e != nil {
+				trace.RecordAction(FrontEndStorageFailed{StorageID: k})
+				delete(f.Storages, k)
+				delete(f.JoinedStorages, k)
+				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				log.Println("Error calling GetState(); retrying with another node...")
+			}
+		} else {
+			reply.Token = trace.GenerateToken()
+			reply.State = reqStateReply.State
+			return nil
 		}
-		reply.Token = trace.GenerateToken()
-		reply.State = reqStateReply.State
-		break
 	}
-
+	log.Printf("Could not connect to any node to update state! \n")
+	reply.Token = trace.GenerateToken()
+	reply.State = make(map[string]string, 0)
 	// RPC call to that node with getState() --> map; non blocking
 	return nil
 }
@@ -409,7 +421,7 @@ waiting:
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 				replies[localIdx].Err = true
 			}
-			storageCalls<-1
+			storageCalls <- 1
 		}(index, element)
 		index = index + 1
 	}
