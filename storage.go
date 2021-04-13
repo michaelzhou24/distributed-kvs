@@ -95,7 +95,6 @@ type StorageRPC struct {
 // FrontEndAddr - IP:Port of frontend node to connect to
 func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr string, diskPath string, trace *tracing.Tracer) error {
 	s := StorageRPC{}
-
 	s.tracer = trace
 
 	currPath, _ := os.Getwd()
@@ -135,10 +134,9 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 		s.diskFile = disk
 
 	}
-	tracer := trace.CreateTrace() // TODO: Dont think this is right?
+	tracer := s.tracer.CreateTrace() // TODO: Dont think this is right?
 	tracer.RecordAction(StorageLoadSuccess{StorageID: storageId, State: s.memoryKVS})
 	// Connect to frontEND
-
 	log.Printf("storage: dailing frontEnd at %s", frontEndAddr)
 	frontEnd, err := rpc.Dial("tcp", frontEndAddr)
 	if err != nil {
@@ -174,7 +172,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	go server.Accept(frontEndListener)
 	reply := FrontEndConnectReply{}
 	e = s.frontEndClient.Call("FrontEndRPCHandler.Connect", fArgs, &reply)
-	trace.ReceiveToken(reply.Token)
+	tracer = trace.ReceiveToken(reply.Token)
 	if e != nil {
 		log.Printf("Error connecting to front end node! \n")
 		panic(e)
@@ -184,14 +182,14 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	// Join
 	tracer.RecordAction(StorageJoining{storageId})
 	// Rpc call to frontEnd.RequestState(); make it blocking
-	reqStateArgs := FrontEndReqStateArgs{Token: tracer.GenerateToken()}
+	reqStateArgs := FrontEndReqStateArgs{Token: tracer.GenerateToken(), StorageID: storageId}
 	reqStateReply := FrontEndReqStateReply{}
 	e = s.frontEndClient.Call("FrontEndRPCHandler.RequestState", reqStateArgs, &reqStateReply)
 	if e != nil {
 		log.Printf("Error: rpc call to frontend.requeststate")
 		panic(e)
 	}
-	trace.ReceiveToken(reqStateReply.Token)
+	tracer = trace.ReceiveToken(reqStateReply.Token)
 	// Replacing local map with values from getState()
 	for k, v := range reqStateReply.State {
 		s.memoryKVS[k] = v
@@ -201,7 +199,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	joinArgs := FrontEndReqJoinArgs{Token: tracer.GenerateToken(), StorageID: storageId}
 	joinReply := FrontEndReqJoinReply{}
 	e = s.frontEndClient.Call("FrontEndRPCHandler.Join", joinArgs, &joinReply)
-	trace.ReceiveToken(joinReply.Token)
+	tracer = trace.ReceiveToken(joinReply.Token)
 
 	return nil
 }

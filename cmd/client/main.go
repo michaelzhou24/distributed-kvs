@@ -79,7 +79,7 @@ func main() {
 	//	log.Println(err)
 	//}
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		select {
 		case mineResult := <-client.NotifyChannel:
 			log.Println(mineResult)
