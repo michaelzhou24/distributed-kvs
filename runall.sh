@@ -6,9 +6,6 @@ make
 cmds=(
       "./tracing-server"
       "./frontend"
-      "./storage -config=config/storage_config.json"
-      "./storage -config=config/storage2_config.json"
-      "./client"
       )
 
 if [[ -d tmp ]]; then

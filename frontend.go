@@ -149,10 +149,14 @@ type FrontEndRPCHandler struct {
 // API Endpoint for storage to connect to when it starts up
 func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndConnectReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(FrontEndStorageFailed{StorageID: args.StorageID})
-	delete(f.JoinedStorages, args.StorageID)
-	delete(f.Storages, args.StorageID)
-	trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+	if f.JoinedStorages[args.StorageID] {
+		f.Mutex.Lock()
+		trace.RecordAction(FrontEndStorageFailed{StorageID: args.StorageID})
+		delete(f.JoinedStorages, args.StorageID)
+		delete(f.Storages, args.StorageID)
+		trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+		f.Mutex.Unlock()
+	}
 	trace.RecordAction(FrontEndStorageStarted{args.StorageID})
 	log.Println("frontend: Dialing storage....")
 	storage, err := rpc.Dial("tcp", args.StorageAddr)
@@ -247,10 +251,12 @@ waiting:
 			log.Println(localIdx)
 			err := f.callPut(callArgs, &(replies[localIdx]), 1, trace, storageID)
 			if err != nil {
+				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 				delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				f.Mutex.Unlock()
 				replies[localIdx].Err = true
 			}
 			storageCalls <- 1
@@ -266,7 +272,11 @@ waiting:
 
 	putReply := FrontEndPutReply{Err: true}
 	for _, fPutReply := range replies {
-		trace = f.Tracer.ReceiveToken(fPutReply.Token)
+		if fPutReply.Token != nil {
+			trace = f.Tracer.ReceiveToken(fPutReply.Token)
+		} else {
+			f.Tracer.ReceiveToken(fPutReply.Token)
+		}
 		log.Println(fPutReply)
 		if !fPutReply.Err {
 			putReply = fPutReply
@@ -360,19 +370,26 @@ func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *Fron
 		reqStateArgs := StorageGetStateArgs{Token: trace.GenerateToken()}
 		reqStateReply := StorageGetStateReply{}
 		e := c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply) // TODO: blocking or non blocking??
-		trace = f.Tracer.ReceiveToken(reqStateReply.Token)
+		f.Tracer.ReceiveToken(reqStateReply.Token)
 		if e != nil {
 			log.Printf("error calling getstate to node %s, retrying again...\n", k)
 			time.Sleep(time.Duration(f.StorageTimeout) * time.Second)
 			reqStateArgs := StorageGetStateArgs{Token: trace.GenerateToken()}
 			reqStateReply := StorageGetStateReply{}
 			e = c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply)
+			f.Tracer.ReceiveToken(reqStateReply.Token)
 			if e != nil {
+				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: k})
 				delete(f.Storages, k)
 				delete(f.JoinedStorages, k)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				f.Mutex.Unlock()
 				log.Println("Error calling GetState(); retrying with another node...")
+			} else {
+				reply.Token = trace.GenerateToken()
+				reply.State = reqStateReply.State
+				return nil
 			}
 		} else {
 			reply.Token = trace.GenerateToken()
@@ -428,10 +445,12 @@ waiting:
 			log.Println(localIdx)
 			err := f.callGet(callArgs, &(replies[localIdx]), 1, trace, storageID)
 			if err != nil {
+				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
 				delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
+				f.Mutex.Unlock()
 				replies[localIdx].Err = true
 			}
 			storageCalls <- 1
@@ -445,7 +464,11 @@ waiting:
 
 	getReply := FrontEndGetReply{Err: true}
 	for _, fGetReply := range replies {
-		trace = f.Tracer.ReceiveToken(fGetReply.Token)
+		if fGetReply.Token != nil {
+			trace = f.Tracer.ReceiveToken(fGetReply.Token)
+		} else {
+			f.Tracer.ReceiveToken(fGetReply.Token)
+		}
 		log.Println(fGetReply)
 		if !fGetReply.Err {
 			getReply = fGetReply
@@ -507,7 +530,7 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
 		if retry == 1 {
-			return f.callGet(callArgs, getReply, 0, trace,storageID)
+			return f.callGet(callArgs, getReply, 0, trace, storageID)
 		} else {
 			log.Println("timed out after retrying")
 			return errors.New("timed out after retrying")

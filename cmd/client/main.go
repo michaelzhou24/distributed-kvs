@@ -5,6 +5,7 @@ import (
 	"example.org/cpsc416/a5/kvslib"
 	"flag"
 	"log"
+	"time"
 )
 
 func main() {
@@ -16,31 +17,48 @@ func main() {
 	flag.StringVar(&config.ClientID, "id", config.ClientID, "Client ID, e.g. client1")
 	flag.Parse()
 
-	//var config2 distkvs.ClientConfig
-	//err = distkvs.ReadJSONConfig("config/client2_config.json", &config2)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//flag.StringVar(&config2.ClientID, "id2", config2.ClientID, "Client ID, e.g. client1")
-	//flag.Parse()
+	var config2 distkvs.ClientConfig
+	err = distkvs.ReadJSONConfig("config/client2_config.json", &config2)
+	if err != nil {
+		log.Fatal(err)
+	}
+	flag.StringVar(&config2.ClientID, "id2", config2.ClientID, "Client ID, e.g. client1")
+	flag.Parse()
 
 	client := distkvs.NewClient(config, kvslib.NewKVS())
 	if err := client.Initialize(); err != nil {
 		log.Fatal(err)
 	}
-	//client2 := distkvs.NewClient(config2, kvslib.NewKVS())
-	//if err := client2.Initialize(); err != nil {
-	//	log.Fatal(err)
-	//}
+	client2 := distkvs.NewClient(config2, kvslib.NewKVS())
+	if err := client2.Initialize(); err != nil {
+		log.Fatal(err)
+	}
 	defer client.Close()
-	//	defer client2.Close()
+	defer client2.Close()
 	if err, _ := client.Put(config.ClientID, "k", "v1"); err != 0 {
 		log.Println(err)
 	}
 	//time.Sleep(5*time.Second)
-	//if err, _ := client2.Put("clientID2", "k", "v2"); err != 0 {
-	//	log.Println(err)
-	//}
+	if err, _ := client2.Put("client2", "k", "v2"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
+		log.Println(err)
+	}
+	log.Printf("Sleeping.... \n\n")
+	time.Sleep(10 * time.Second)
+	if err, _ := client2.Get("client2", "k"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client2.Put("client2", "k", "v3"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client2.Get("client2", "k"); err != 0 {
+		log.Println(err)
+	}
 
 	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
 		log.Println(err)
@@ -79,7 +97,7 @@ func main() {
 	//	log.Println(err)
 	//}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 7; i++ {
 		select {
 		case mineResult := <-client.NotifyChannel:
 			log.Println(mineResult)
@@ -89,7 +107,8 @@ func main() {
 			//	log.Println(mineResult)
 			//case mineResult := <-client4.NotifyChannel:
 			//	log.Println(mineResult)
+		case mineResult2 := <-client2.NotifyChannel:
+			log.Println(mineResult2)
 		}
 	}
-
 }
