@@ -5,7 +5,6 @@ import (
 	"example.org/cpsc416/a5/kvslib"
 	"flag"
 	"log"
-	"time"
 )
 
 func main() {
@@ -38,7 +37,7 @@ func main() {
 	if err, _ := client.Put(config.ClientID, "k", "v1"); err != 0 {
 		log.Println(err)
 	}
-	//time.Sleep(5*time.Second)
+	//time.Sleep(3*time.Second)
 	if err, _ := client2.Put("client2", "k", "v2"); err != 0 {
 		log.Println(err)
 	}
@@ -46,8 +45,7 @@ func main() {
 	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
 		log.Println(err)
 	}
-	log.Printf("Sleeping.... \n\n")
-	time.Sleep(10 * time.Second)
+	//time.Sleep(3 * time.Second)
 	if err, _ := client2.Get("client2", "k"); err != 0 {
 		log.Println(err)
 	}
@@ -63,30 +61,44 @@ func main() {
 	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
 		log.Println(err)
 	}
-	//time.Sleep(time.Second * 10)
-	//if err, _ := client.Put(config.ClientID, "big", "v555"); err != 0 {
-	//	log.Println(err)
-	//}
+	//time.Sleep(time.Second * 3)
+	if err, _ := client.Put(config.ClientID, "big", "v555"); err != 0 {
+		log.Println(err)
+	}
 
-	//if err, _ := client.Get("clientID1", "k"); err != 0 {
-	//	log.Println(err)
-	//}
+	if err, _ := client.Get(config.ClientID, "big"); err != 0 {
+		log.Println(err)
+	}
 
-	//if err, _ := client2.Put("clientID2", "key3", "value3"); err != 0 {
-	//	log.Println(err)
-	//}
-	//if err, _ := client.Put("clientID1", "key2", "value3"); err != 0 {
-	//	log.Println(err)
-	//}
-	//if err, _ := client.Put("clientID1", "key2", "value4"); err != 0 {
-	//	log.Println(err)
-	//}
-	//if err, _ := client.Put("clientID1", "key2", "value5"); err != 0 {
-	//	log.Println(err)
-	//}
-	//if err, _ := client.Put("clientID1", "key2", "value6"); err != 0 {
-	//	log.Println(err)
-	//}
+	if err, _ := client2.Put("client2", "k", "value3"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put(config.ClientID, "k", "value3"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put(config.ClientID, "k", "value4"); err != 0 {
+		log.Println(err)
+	}
+	//time.Sleep(time.Second * 3)
+	if err, _ := client.Put(config.ClientID, "k", "value5"); err != 0 {
+		log.Println(err)
+	}
+	if err, _ := client.Put(config.ClientID, "k", "value6"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client.Get(config.ClientID, "k"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client2.Get("client2", "k"); err != 0 {
+		log.Println(err)
+	}
+
+	if err, _ := client2.Get("client2", "big"); err != 0 {
+		log.Println(err)
+	}
+
 
 	//for i := 0; i < 2; i++ {
 	//	result := <-client.NotifyChannel
@@ -97,7 +109,7 @@ func main() {
 	//	log.Println(err)
 	//}
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 17; i++ {
 		select {
 		case mineResult := <-client.NotifyChannel:
 			log.Println(mineResult)

@@ -5,3 +5,6 @@ storage
 client
 *.log
 tmp
+*.sh
+*.txt
+gradera6-smoketest

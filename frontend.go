@@ -216,15 +216,16 @@ func (f *FrontEndRPCHandler) addToClientMap(clientId string) {
 func (f *FrontEndRPCHandler) Put(args FrontEndPutArgs, reply *KvslibPutReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	f.addToClientMap(args.ClientId)
+	clientChan := f.ClientState[args.ClientId]
 waiting:
 	for {
 		select {
-		case val := <-f.ClientState[args.ClientId]:
+		case val := <-clientChan:
 			if val >= args.OpId {
 				log.Println(val)
 				break waiting
 			} else {
-				f.ClientState[args.ClientId] <- val
+				clientChan <- val
 			}
 		}
 	}
@@ -237,17 +238,12 @@ waiting:
 	log.Printf("\n \n ############ Joined storages at put is: %s \n\n", f.JoinedStorages)
 	replies := make([]FrontEndPutReply, currentActiveStorages)
 	index := 0
-	//mu := sync.Mutex{}
 	storageCalls := make(chan uint8, currentActiveStorages)
 	for storageID := range f.Storages {
 		if !f.JoinedStorages[storageID] {
 			continue
 		}
 		go func(localIdx int, storageID string) {
-			//mu.Lock()
-			//localIdx := index
-			//index = index + 1
-			//mu.Unlock()
 			log.Println(localIdx)
 			err := f.callPut(callArgs, &(replies[localIdx]), 1, trace, storageID)
 			if err != nil {
@@ -267,8 +263,7 @@ waiting:
 		<-storageCalls
 	}
 
-	// TODO: handle replies, handle Err
-	f.ClientState[args.ClientId] <- (args.OpId + 1)
+	clientChan <- (args.OpId + 1)
 
 	putReply := FrontEndPutReply{Err: true}
 	for _, fPutReply := range replies {
@@ -413,14 +408,15 @@ func (f *FrontEndRPCHandler) getJoinedStorageIDs() []string {
 func (f *FrontEndRPCHandler) Get(args FrontEndGetArgs, reply *KvslibGetReply) error {
 	trace := f.Tracer.ReceiveToken(args.Token)
 	f.addToClientMap(args.ClientId)
+	clientChan := f.ClientState[args.ClientId]
 waiting:
 	for {
 		select {
-		case val := <-f.ClientState[args.ClientId]:
+		case val := <-clientChan:
 			if val >= args.OpId {
 				break waiting
 			} else {
-				f.ClientState[args.ClientId] <- val
+				clientChan <- val
 			}
 		}
 	}
@@ -438,10 +434,6 @@ waiting:
 			continue
 		}
 		go func(localIdx int, storageID string) {
-			//mu.Lock()
-			//localIdx := index
-			//index = index + 1
-			//mu.Unlock()
 			log.Println(localIdx)
 			err := f.callGet(callArgs, &(replies[localIdx]), 1, trace, storageID)
 			if err != nil {
@@ -460,7 +452,7 @@ waiting:
 	for i := 0; i < currentActiveStorages; i++ {
 		<-storageCalls
 	}
-	f.ClientState[args.ClientId] <- args.OpId + 1
+	clientChan <- args.OpId + 1
 
 	getReply := FrontEndGetReply{Err: true}
 	for _, fGetReply := range replies {
