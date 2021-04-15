@@ -144,6 +144,7 @@ type FrontEndRPCHandler struct {
 	ClientState    map[string]OpIdChan
 	JoinedStorages map[string]bool // this is a set; need a way to differentiate joined nodes and connected nodes
 	Mutex          sync.Mutex
+	JoinMutex      sync.Mutex
 }
 
 // API Endpoint for storage to connect to when it starts up
@@ -153,7 +154,7 @@ func (f *FrontEndRPCHandler) Connect(args FrontEndConnectArgs, reply *FrontEndCo
 		f.Mutex.Lock()
 		trace.RecordAction(FrontEndStorageFailed{StorageID: args.StorageID})
 		delete(f.JoinedStorages, args.StorageID)
-		delete(f.Storages, args.StorageID)
+		//delete(f.Storages, args.StorageID)
 		trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 		f.Mutex.Unlock()
 	}
@@ -239,7 +240,7 @@ waiting:
 	replies := make([]FrontEndPutReply, currentActiveStorages)
 	index := 0
 	storageCalls := make(chan uint8, currentActiveStorages)
-	for storageID := range f.Storages {
+	for storageID := range f.JoinedStorages {
 		if !f.JoinedStorages[storageID] {
 			continue
 		}
@@ -249,7 +250,7 @@ waiting:
 			if err != nil {
 				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
-				delete(f.Storages, storageID)
+				//delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 				f.Mutex.Unlock()
@@ -294,7 +295,6 @@ waiting:
 		reply.Token = trace.GenerateToken()
 		reply.OpId = args.OpId
 	}
-
 	return nil
 }
 
@@ -347,21 +347,30 @@ func (f *FrontEndRPCHandler) Join(args FrontEndReqJoinArgs, reply *FrontEndReqJo
 }
 
 func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *FrontEndReqStateReply) error {
+	f.JoinMutex.Lock()
+	log.Printf("%s is requesting state from frontend... \n\n", args.StorageID)
+
 	trace := f.Tracer.ReceiveToken(args.Token)
 
 	if len(f.JoinedStorages) == 0 {
 
 		reply.Token = trace.GenerateToken()
 		reply.State = make(map[string]string, 0)
+		f.JoinMutex.Unlock()
 		return nil
 	}
 	// Finds up to date storage node;
+	newMap := make(map[string]bool)
+	for k, v := range f.JoinedStorages {
 
-	for k := range f.JoinedStorages {
+		newMap[k] = v
+	}
+	for k := range newMap {
 		if k == args.StorageID {
 			continue
 		}
 		c := f.Storages[k] // Returns random joined client;
+		log.Printf("Requesting state from storage node: %s ... \n\n", k)
 		reqStateArgs := StorageGetStateArgs{Token: trace.GenerateToken()}
 		reqStateReply := StorageGetStateReply{}
 		e := c.Call("StorageRPC.GetState", reqStateArgs, &reqStateReply) // TODO: blocking or non blocking??
@@ -376,19 +385,23 @@ func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *Fron
 			if e != nil {
 				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: k})
-				delete(f.Storages, k)
+				// delete(f.Storages, k)
 				delete(f.JoinedStorages, k)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 				f.Mutex.Unlock()
-				log.Println("Error calling GetState(); retrying with another node...")
+				log.Printf("%s :L Error calling GetState(); retrying with another node..., \n", args.StorageID)
 			} else {
 				reply.Token = trace.GenerateToken()
 				reply.State = reqStateReply.State
+				f.JoinMutex.Unlock()
+
 				return nil
 			}
 		} else {
 			reply.Token = trace.GenerateToken()
 			reply.State = reqStateReply.State
+			f.JoinMutex.Unlock()
+
 			return nil
 		}
 	}
@@ -396,6 +409,8 @@ func (f *FrontEndRPCHandler) RequestState(args FrontEndReqStateArgs, reply *Fron
 	reply.Token = trace.GenerateToken()
 	reply.State = make(map[string]string, 0)
 	// RPC call to that node with getState() --> map; non blocking
+	f.JoinMutex.Unlock()
+
 	return nil
 }
 func (f *FrontEndRPCHandler) getJoinedStorageIDs() []string {
@@ -429,7 +444,10 @@ waiting:
 	index := 0
 	//mu := sync.Mutex{}
 	storageCalls := make(chan uint8, currentActiveStorages)
-	for storageID := range f.Storages {
+	//log.Println(f.Storages)
+	//log.Println(f.JoinedStorages)
+	for storageID := range f.JoinedStorages {
+		log.Printf("I am running \n \n \n ")
 		if !f.JoinedStorages[storageID] {
 			continue
 		}
@@ -439,7 +457,7 @@ waiting:
 			if err != nil {
 				f.Mutex.Lock()
 				trace.RecordAction(FrontEndStorageFailed{StorageID: storageID})
-				delete(f.Storages, storageID)
+				//	delete(f.Storages, storageID)
 				delete(f.JoinedStorages, storageID)
 				trace.RecordAction(FrontEndStorageJoined{f.getJoinedStorageIDs()})
 				f.Mutex.Unlock()
@@ -516,6 +534,7 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 				return errors.New("timed out after retrying")
 			}
 		}
+		log.Println(err)
 		log.Println("Done with callget", getReply)
 		return err
 		// use err and result

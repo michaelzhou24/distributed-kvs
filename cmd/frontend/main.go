@@ -24,7 +24,7 @@ func main() {
 	})
 
 	frontend := distkvs.FrontEnd{}
-	err = frontend.Start(config.ClientAPIListenAddr, config.StorageAPIListenAddr, 8, tracer)
+	err = frontend.Start(config.ClientAPIListenAddr, config.StorageAPIListenAddr, 5, tracer)
 
 	if err != nil {
 		log.Fatal(err)

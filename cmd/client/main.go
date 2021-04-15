@@ -99,7 +99,6 @@ func main() {
 		log.Println(err)
 	}
 
-
 	//for i := 0; i < 2; i++ {
 	//	result := <-client.NotifyChannel
 	//	log.Println(result)
