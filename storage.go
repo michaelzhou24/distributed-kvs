@@ -194,6 +194,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	for k, v := range reqStateReply.State {
 		s.memoryKVS[k] = v
 	}
+	log.Println(s.memoryKVS)
 	tracer.RecordAction(StorageJoined{storageId, s.memoryKVS})
 	// frontEndstorageJoined
 	joinArgs := FrontEndReqJoinArgs{Token: tracer.GenerateToken(), StorageID: storageId}
@@ -214,6 +215,8 @@ func (s *StorageRPC) GetState(args StorageGetStateArgs, reply *StorageGetStateRe
 }
 func (s *StorageRPC) Get(args StorageGetArgs, reply *FrontEndGetReply) error {
 	trace := s.tracer.ReceiveToken(args.Token)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	trace.RecordAction(StorageGet{StorageID: s.storageID, Key: args.Key})
 
 	key := args.Key

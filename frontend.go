@@ -145,6 +145,7 @@ type FrontEndRPCHandler struct {
 	JoinedStorages map[string]bool // this is a set; need a way to differentiate joined nodes and connected nodes
 	Mutex          sync.Mutex
 	JoinMutex      sync.Mutex
+	OpMutex sync.Mutex // TODO: Shared lock or not??
 }
 
 // API Endpoint for storage to connect to when it starts up
@@ -230,6 +231,7 @@ waiting:
 			}
 		}
 	}
+	f.OpMutex.Lock()
 	trace.RecordAction(FrontEndPut{
 		Key:   args.Key,
 		Value: args.Value,
@@ -263,6 +265,7 @@ waiting:
 	for i := 0; i < currentActiveStorages; i++ {
 		<-storageCalls
 	}
+	f.OpMutex.Unlock()
 
 	clientChan <- (args.OpId + 1)
 
@@ -302,8 +305,12 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 	callArgs.Token = trace.GenerateToken()
 	c := make(chan error, 1)
 	go func() {
-		if storage, ok := f.Storages[storageID]; ok {
-			c <- storage.Call("StorageRPC.Put", callArgs, putReply)
+		if storageJoined, ok := f.JoinedStorages[storageID]; ok && storageJoined {
+			if storage, ok := f.Storages[storageID]; ok {
+				c <- storage.Call("StorageRPC.Put", callArgs, putReply)
+			} else {
+				c <- rpc.ErrShutdown
+			}
 		} else {
 			c <- rpc.ErrShutdown
 		}
@@ -435,6 +442,7 @@ waiting:
 			}
 		}
 	}
+	f.OpMutex.Lock()
 	trace.RecordAction(FrontEndGet{
 		Key: args.Key,
 	})
@@ -470,6 +478,7 @@ waiting:
 	for i := 0; i < currentActiveStorages; i++ {
 		<-storageCalls
 	}
+	f.OpMutex.Unlock()
 	clientChan <- args.OpId + 1
 
 	getReply := FrontEndGetReply{Err: true}
@@ -516,8 +525,12 @@ func (f *FrontEndRPCHandler) callGet(callArgs StorageGetArgs, getReply *FrontEnd
 	callArgs.Token = trace.GenerateToken()
 	c := make(chan error, 1)
 	go func() {
-		if storage, ok := f.Storages[storageID]; ok {
-			c <- storage.Call("StorageRPC.Get", callArgs, getReply)
+		if storageJoined, ok := f.JoinedStorages[storageID]; ok && storageJoined {
+			if storage, ok := f.Storages[storageID]; ok {
+				c <- storage.Call("StorageRPC.Get", callArgs, getReply)
+			} else {
+				c <- rpc.ErrShutdown
+			}
 		} else {
 			c <- rpc.ErrShutdown
 		}
