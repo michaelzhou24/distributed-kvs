@@ -308,8 +308,8 @@ waiting:
 func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEndPutReply, retry uint8, trace *tracing.Trace, storageID string) error {
 	callArgs.Token = trace.GenerateToken()
 	c := make(chan error, 1)
+	f.Mutex.Lock()
 	go func() {
-		//f.Mutex.Lock()
 		//defer f.Mutex.Unlock()
 		storageJoined, ok := f.JoinedStorages[storageID]
 		log.Println(retry, storageJoined, ok)
@@ -326,6 +326,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 	select {
 	case err := <-c:
 		// use err and result
+		f.Mutex.Unlock()
 		if err == rpc.ErrShutdown {
 			log.Printf("Storage connection shutdown, retrying... \n")
 			if retry == 1 {
@@ -341,6 +342,7 @@ func (f *FrontEndRPCHandler) callPut(callArgs StoragePutArgs, putReply *FrontEnd
 		return err
 	case <-time.After(time.Duration(uint64(f.StorageTimeout) * 1e9)):
 		// call timed out
+		f.Mutex.Unlock()
 		if retry == 1 {
 			return f.callPut(callArgs, putReply, 0, trace, storageID)
 		} else {
