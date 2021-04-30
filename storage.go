@@ -202,7 +202,7 @@ func (s1 *Storage) Start(storageId string, frontEndAddr string, storageAddr stri
 	e = s.frontEndClient.Call("FrontEndRPCHandler.Join", joinArgs, &joinReply)
 	tracer = trace.ReceiveToken(joinReply.Token)
 
-	return nil
+	select {}
 }
 
 func (s *StorageRPC) GetState(args StorageGetStateArgs, reply *StorageGetStateReply) error {
